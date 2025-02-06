@@ -1,15 +1,29 @@
-import React from "react";
-import Chat from "./components/Chat";
-import { ThemeProvider, createTheme } from "@mui/material/styles";
+import React, { useState, useMemo } from "react";
+import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
-
-const theme = createTheme();
+import Chat from "./components/Chat";
+import { lightTheme, darkTheme } from "./theme";
 
 function App() {
+  const [mode, setMode] = useState(
+    () => localStorage.getItem("theme") || "light"
+  );
+
+  const theme = useMemo(
+    () => (mode === "light" ? lightTheme : darkTheme),
+    [mode]
+  );
+
+  const toggleTheme = () => {
+    const newMode = mode === "light" ? "dark" : "light";
+    setMode(newMode);
+    localStorage.setItem("theme", newMode);
+  };
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Chat />
+      <Chat toggleTheme={toggleTheme} />
     </ThemeProvider>
   );
 }
