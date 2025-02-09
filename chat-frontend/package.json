@@ -7,11 +7,14 @@
     "@emotion/styled": "^11.14.0",
     "@mui/icons-material": "^6.4.3",
     "@mui/material": "^6.4.3",
+    "@mui/system": "^6.4.3",
     "cra-template": "1.2.0",
     "date-fns": "^4.1.0",
+    "framer-motion": "^12.4.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-scripts": "5.0.1"
+    "react-scripts": "5.0.1",
+    "simplebar-react": "^3.3.0"
   },
   "scripts": {
     "start": "react-scripts start",
