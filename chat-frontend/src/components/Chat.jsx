@@ -56,8 +56,16 @@ function Chat({ toggleTheme }) {
       console.log("Received message:", message);
 
       switch (message.message_type) {
+        case "user_list": // Handle the new UserList message type
+          if (message.users) {
+            setOnlineUsers(new Set(message.users));
+          }
+          break;
         case "typing":
-          setTypingUsers((prev) => new Set([...prev, message.user]));
+          // Only add typing indicator if it's not the current user
+          if (message.user !== username) {
+            setTypingUsers((prev) => new Set([...prev, message.user]));
+          }
           break;
         case "stop_typing":
           setTypingUsers((prev) => {
@@ -78,13 +86,27 @@ function Chat({ toggleTheme }) {
           });
           setMessages((prev) => [...prev, message]);
           break;
-        default:
+        case "chat":
           setMessages((prev) => [...prev, message]);
+          break;
+        default:
+          console.log("Unknown message type:", message.message_type);
       }
 
       if (messageAreaRef.current) {
         messageAreaRef.current.scrollTop = messageAreaRef.current.scrollHeight;
       }
+    };
+
+    wsRef.current.onclose = () => {
+      console.log("Disconnected from WebSocket");
+      setConnected(false);
+      setOnlineUsers(new Set());
+      setTypingUsers(new Set());
+    };
+
+    wsRef.current.onerror = (error) => {
+      console.error("WebSocket error:", error);
     };
 
     return () => {
