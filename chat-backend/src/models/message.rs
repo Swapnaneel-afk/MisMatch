@@ -8,7 +8,8 @@ pub enum MessageType {
     Join,
     Leave,
     Typing,
-    StopTyping
+    StopTyping,
+    UserList  // New message type
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -19,6 +20,8 @@ pub struct ChatMessage {
     pub timestamp: DateTime<Utc>,
     #[serde(default = "default_avatar")]
     pub avatar: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub users: Option<Vec<String>>,  // For sending user list
 }
 
 fn default_avatar() -> String {

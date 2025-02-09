@@ -1,7 +1,7 @@
 use crate::models::message::{ChatMessage, MessageType};
 use crate::models::session::{ChatSession, WsMessage};
 use crate::utils::avatar::generate_avatar_url;
-use actix::{Actor, Handler, StreamHandler, AsyncContext, ActorContext}; // Added missing traits
+use actix::{Actor, Handler, StreamHandler, AsyncContext, ActorContext};
 use actix_web_actors::ws;
 use chrono::Utc;
 
@@ -10,14 +10,38 @@ impl Actor for ChatSession {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         let mut connections = self.addr.lock().unwrap();
+        
+        // Get current user list before adding new user
+        let current_users: Vec<String> = connections.iter()
+            .map(|(username, _)| username.clone())
+            .collect();
+
+        // Add new user
         connections.push((self.username.clone(), ctx.address()));
 
+        // Send current user list to the new user
+        let user_list_message = ChatMessage {
+            message_type: MessageType::UserList,
+            user: "system".to_string(),
+            text: "Current users".to_string(),
+            timestamp: Utc::now(),
+            avatar: generate_avatar_url("system"),
+            users: Some(current_users),
+        };
+
+        // Send user list only to the new user
+        if let Ok(msg) = serde_json::to_string(&user_list_message) {
+            ctx.text(msg);
+        }
+
+        // Send join notification to all users
         let join_message = ChatMessage {
             message_type: MessageType::Join,
             user: self.username.clone(),
             text: format!("{} joined the chat", self.username),
             timestamp: Utc::now(),
             avatar: generate_avatar_url(&self.username),
+            users: None,
         };
 
         let msg = serde_json::to_string(&join_message).unwrap();
@@ -36,6 +60,7 @@ impl Actor for ChatSession {
             text: format!("{} left the chat", self.username),
             timestamp: Utc::now(),
             avatar: generate_avatar_url(&self.username),
+            users: None,
         };
 
         let msg = serde_json::to_string(&leave_message).unwrap();
@@ -49,8 +74,7 @@ impl Handler<WsMessage> for ChatSession {
     type Result = ();
 
     fn handle(&mut self, msg: WsMessage, ctx: &mut Self::Context) {
-        println!("Handling WsMessage: {}", msg.0);
-        ctx.text(msg.0); // Removed generic parameter
+        ctx.text(msg.0);
     }
 }
 
@@ -69,13 +93,23 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
                         println!("Processed message: {:?}", chat_message);
 
                         if let Ok(msg) = serde_json::to_string(&chat_message) {
-                            println!("Broadcasting message: {}", msg);
                             let connections = self.addr.lock().unwrap();
-                            println!("Number of connections: {}", connections.len());
                             
-                            for (username, addr) in connections.iter() {
-                                println!("Sending to user: {}", username);
-                                addr.do_send(WsMessage(msg.clone()));
+                            match chat_message.message_type {
+                                MessageType::Typing | MessageType::StopTyping => {
+                                    // Send typing indicators to everyone except the sender
+                                    for (username, addr) in connections.iter() {
+                                        if username != &self.username {
+                                            addr.do_send(WsMessage(msg.clone()));
+                                        }
+                                    }
+                                },
+                                _ => {
+                                    // Send other messages to everyone
+                                    for (_, addr) in connections.iter() {
+                                        addr.do_send(WsMessage(msg.clone()));
+                                    }
+                                }
                             }
                         }
                     }
@@ -85,7 +119,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
                     }
                 }
             }
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg), // Removed generic parameter
+            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
             Ok(ws::Message::Pong(_)) => (),
             Ok(ws::Message::Close(reason)) => {
                 ctx.close(reason);

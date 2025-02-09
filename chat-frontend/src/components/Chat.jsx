@@ -43,7 +43,9 @@ function Chat({ toggleTheme }) {
     if (!username) return;
 
     wsRef.current = new WebSocket(
-      `ws://127.0.0.1:8080/ws?username=${encodeURIComponent(username)}`
+      `https://mismatch-production.up.railway.app/ws?username=${encodeURIComponent(
+        username
+      )}`
     );
 
     wsRef.current.onopen = () => {

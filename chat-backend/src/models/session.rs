@@ -1,4 +1,4 @@
-use actix::Message;
+use actix::{Actor, Message};
 use std::sync::{Arc, Mutex};
 
 #[derive(Message)]
