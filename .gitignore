@@ -3,3 +3,4 @@ chat-backend/debug/
 *.exe
 **/*.rs.bk
 Cargo.lock
+node_modules/

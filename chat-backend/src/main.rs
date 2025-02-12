@@ -1,103 +1,60 @@
-use actix::{Actor, Handler, Message, StreamHandler, AsyncContext, ActorContext};
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
-use actix_web_actors::ws;
+mod models;
+mod handlers;
+mod utils;
+mod db;
+
+use actix_web::{web, App, HttpServer, HttpResponse};
 use std::sync::{Arc, Mutex};
-use serde::{Serialize, Deserialize};
-use rand::Rng;
+use crate::handlers::http::chat_route;
+use crate::models::session::ChatSession;
 
-// Message structure
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChatMessage {
-    pub user: String,
-    pub text: String,
-}
+use actix_cors::Cors;
+use dotenv::dotenv;
+use std::env;
+use actix_web::http::header;
 
-// Custom message type for our actor
-#[derive(Message)]
-#[rtype(result = "()")]
-struct WsMessage(String);
-
-// WebSocket actor
-struct ChatSession {
-    id: u32,  // Changed to u32 for simpler random generation
-    addr: Arc<Mutex<Vec<actix::Addr<ChatSession>>>>,
-}
-
-impl Actor for ChatSession {
-    type Context = ws::WebsocketContext<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        // Store the address when the session starts
-        self.addr.lock().unwrap().push(ctx.address());
-    }
-
-    fn stopped(&mut self, ctx: &mut Self::Context) {
-        // Remove the address when the session stops
-        let mut addresses = self.addr.lock().unwrap();
-        addresses.retain(|addr| addr != &ctx.address());
-    }
-}
-
-impl Handler<WsMessage> for ChatSession {
-    type Result = ();
-
-    fn handle(&mut self, msg: WsMessage, ctx: &mut Self::Context) {
-        ctx.text(msg.0);
-    }
-}
-
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(ws::Message::Text(text)) => {
-                // Broadcast message to all clients
-                let msg = text.to_string();
-                for addr in self.addr.lock().unwrap().iter() {
-                    addr.do_send(WsMessage(msg.clone()));
-                }
-            }
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Close(reason)) => {
-                ctx.close(reason);
-                ctx.stop();
-            }
-            _ => (),
-        }
-    }
-}
-
-async fn chat_route(
-    req: HttpRequest,
-    stream: web::Payload,
-    srv: web::Data<Arc<Mutex<Vec<actix::Addr<ChatSession>>>>>,
-) -> Result<HttpResponse, Error> {
-    let id = rand::thread_rng().gen_range(1..=1000);  // Generate random ID between 1 and 1000
-    let resp = ws::start(
-        ChatSession {
-            id,
-            addr: srv.get_ref().clone(),
-        },
-        &req,
-        stream,
-    );
-    resp
+async fn health_check() -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "ok",
+        "message": "Server is running"
+    }))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv().ok();
+    std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    // Shared state for active connections
-    let connections: Arc<Mutex<Vec<actix::Addr<ChatSession>>>> = Arc::new(Mutex::new(Vec::new()));
+    let pool = db::create_pool().await;
+
+    let client = pool.get().await.expect("Failed to get DB client");
+    db::schema::create_tables(&client).await.expect("Failed to create tables");
+
+    let connections: Arc<Mutex<Vec<(String, actix::Addr<ChatSession>)>>> = 
+        Arc::new(Mutex::new(Vec::new()));
 
     println!("Starting server at http://127.0.0.1:8080");
 
     HttpServer::new(move || {
+        let cors = Cors::default()
+            .allowed_origin("http://localhost:3000")  // Changed for local development
+            .allowed_methods(vec!["GET", "POST"])
+            .allowed_headers(vec![
+                header::AUTHORIZATION,
+                header::ACCEPT,
+                header::CONTENT_TYPE
+            ])
+            .supports_credentials();
+
         App::new()
+            .wrap(cors)
             .app_data(web::Data::new(connections.clone()))
             .route("/ws", web::get().to(chat_route))
+            .route("/health", web::get().to(health_check))
+            .wrap(actix_web::middleware::Logger::default())
     })
-    .bind("127.0.0.1:8080")?
+    .bind("127.0.0.1:8080")?  // Local development address
     .run()
     .await
 }
