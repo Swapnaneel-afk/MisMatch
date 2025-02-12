@@ -42,10 +42,14 @@ function Chat({ toggleTheme }) {
   useEffect(() => {
     if (!username) return;
 
+    const WS_URL =
+      process.env.NODE_ENV === "production"
+        ? "wss://mismatch-production.up.railway.app"
+        : "ws://127.0.0.1:8080";
+
+    // In your useEffect:
     wsRef.current = new WebSocket(
-      `https://mismatch-production.up.railway.app/ws?username=${encodeURIComponent(
-        username
-      )}`
+      `${WS_URL}/ws?username=${encodeURIComponent(username)}`
     );
 
     wsRef.current.onopen = () => {
