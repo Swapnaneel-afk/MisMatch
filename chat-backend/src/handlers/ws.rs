@@ -1,10 +1,9 @@
-
 use crate::models::session::{ChatSession, WsMessage};
 use crate::utils::avatar::generate_avatar_url;
 use actix::{Actor, Handler, StreamHandler, AsyncContext, ActorContext};
 use actix_web_actors::ws;
 use chrono::{DateTime, Utc};
-
+use std::sync::Arc;  // Add this import
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -112,22 +111,38 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
             Ok(ws::Message::Text(text)) => {
-                println!("Received text message: {}", text);
-
                 match serde_json::from_str::<ChatMessage>(&text) {
                     Ok(mut chat_message) => {
                         chat_message.user = self.username.clone();
                         chat_message.timestamp = Utc::now();
                         chat_message.avatar = generate_avatar_url(&self.username);
 
-                        println!("Processed message: {:?}", chat_message);
+                        // Save chat message to database
+                        if let MessageType::Chat = chat_message.message_type {
+                            if let Some(room_id) = chat_message.room_id {
+                                let db_pool = Arc::clone(&self.db_pool);
+                                let content = chat_message.text.clone();
+                                let sender_id = chat_message.user.clone();
+                                
+                                // Spawn a new task to handle database operation
+                                let fut = async move {
+                                    if let Ok(client) = db_pool.get().await {
+                                        let _ = client.execute(
+                                            "INSERT INTO messages (room_id, sender_id, content) VALUES ($1, $2, $3)",
+                                            &[&room_id, &sender_id, &content]
+                                        ).await;
+                                    }
+                                };
+                                actix_web::rt::spawn(fut);
+                            }
+                        }
 
+                        // Broadcast message
                         if let Ok(msg) = serde_json::to_string(&chat_message) {
                             let connections = self.addr.lock().unwrap();
                             
                             match chat_message.message_type {
                                 MessageType::Typing | MessageType::StopTyping => {
-                                    // Send typing indicators to everyone except the sender
                                     for (username, addr) in connections.iter() {
                                         if username != &self.username {
                                             addr.do_send(WsMessage(msg.clone()));
@@ -135,7 +150,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
                                     }
                                 },
                                 _ => {
-                                    // Send other messages to everyone
                                     for (_, addr) in connections.iter() {
                                         addr.do_send(WsMessage(msg.clone()));
                                     }

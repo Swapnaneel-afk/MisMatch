@@ -6,6 +6,7 @@ import {
   Avatar,
   useTheme,
   Button,
+  CircularProgress, // Add this
 } from "@mui/material";
 import { motion, AnimatePresence } from "framer-motion";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
@@ -22,23 +23,96 @@ import {
   StyledTextField,
   UserChip,
 } from "./StyledComponents";
+import RoomDialog from "./RoomDialog";
+import RoomList from "./RoomList";
 
 function Chat({ toggleTheme }) {
+  // State management
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState("");
   const [connected, setConnected] = useState(false);
   const [username, setUsername] = useState("");
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [typingUsers, setTypingUsers] = useState(new Set());
+  const [rooms, setRooms] = useState([]);
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [openNewRoomDialog, setOpenNewRoomDialog] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [page, setPage] = useState(1);
+
+  // Refs
   const wsRef = useRef(null);
   const messageAreaRef = useRef(null);
   const typingTimeoutRef = useRef({});
   const theme = useTheme();
 
+  // Utility functions
   const formatMessageTime = (timestamp) => {
     return format(new Date(timestamp), "HH:mm");
   };
 
+  const fetchRoomHistory = async (roomId) => {
+    setIsLoadingHistory(true);
+    try {
+      const response = await fetch(
+        `http://localhost:8080/api/rooms/${roomId}/history/50`
+      );
+      if (response.ok) {
+        const history = await response.json();
+        setMessages((prevMessages) => [
+          ...history,
+          ...prevMessages.filter((msg) => msg.room_id !== roomId),
+        ]);
+      }
+    } catch (error) {
+      console.error("Failed to fetch room history:", error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const loadMoreMessages = async () => {
+    if (!selectedRoom || !hasMoreMessages) return;
+
+    try {
+      const response = await fetch(
+        `http://localhost:8080/api/rooms/${selectedRoom.id}/history/50?page=${page}`
+      );
+      if (response.ok) {
+        const history = await response.json();
+        if (history.length < 50) {
+          setHasMoreMessages(false);
+        }
+        setMessages((prevMessages) => [...history, ...prevMessages]);
+        setPage((prev) => prev + 1);
+      }
+    } catch (error) {
+      console.error("Failed to load more messages:", error);
+    }
+  };
+
+  // Room loading effect
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        const response = await fetch("http://localhost:8080/api/rooms");
+        if (response.ok) {
+          const roomsList = await response.json();
+          setRooms(roomsList);
+          console.log("Loaded rooms:", roomsList); // Debug log
+        }
+      } catch (error) {
+        console.error("Failed to load rooms:", error);
+      }
+    };
+
+    if (connected) {
+      loadRooms();
+    }
+  }, [connected]);
+
+  // WebSocket connection effect
   useEffect(() => {
     if (!username) return;
 
@@ -47,7 +121,6 @@ function Chat({ toggleTheme }) {
         ? "wss://mismatch-production.up.railway.app"
         : "ws://127.0.0.1:8080";
 
-    // In your useEffect:
     wsRef.current = new WebSocket(
       `${WS_URL}/ws?username=${encodeURIComponent(username)}`
     );
@@ -62,13 +135,20 @@ function Chat({ toggleTheme }) {
       console.log("Received message:", message);
 
       switch (message.message_type) {
-        case "user_list": // Handle the new UserList message type
+        case "chat":
+          setMessages((prev) =>
+            [...prev, message].sort(
+              (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+            )
+          );
+          break;
+
+        case "user_list":
           if (message.users) {
             setOnlineUsers(new Set(message.users));
           }
           break;
         case "typing":
-          // Only add typing indicator if it's not the current user
           if (message.user !== username) {
             setTypingUsers((prev) => new Set([...prev, message.user]));
           }
@@ -99,7 +179,7 @@ function Chat({ toggleTheme }) {
           console.log("Unknown message type:", message.message_type);
       }
 
-      if (messageAreaRef.current) {
+      if (messageAreaRef.current && message.message_type === "chat") {
         messageAreaRef.current.scrollTop = messageAreaRef.current.scrollHeight;
       }
     };
@@ -121,6 +201,41 @@ function Chat({ toggleTheme }) {
       }
     };
   }, [username]);
+  // Handlers
+  const handleCreateRoom = async (roomData) => {
+    try {
+      console.log("Creating room with data:", roomData); // Debug log
+
+      const response = await fetch("http://localhost:8080/api/rooms", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: roomData.name,
+          room_type: roomData.room_type,
+          password: roomData.password,
+          created_by: username,
+        }),
+      });
+
+      const responseText = await response.text();
+      console.log("Server response:", responseText); // Debug log
+
+      if (!response.ok) {
+        console.error("Failed to create room:", response.status, responseText);
+        return;
+      }
+
+      const newRoom = JSON.parse(responseText);
+      console.log("Room created:", newRoom);
+      setRooms((prev) => [...prev, newRoom]);
+      setSelectedRoom(newRoom);
+      setOpenNewRoomDialog(false);
+    } catch (error) {
+      console.error("Failed to create room:", error);
+    }
+  };
 
   const handleTyping = () => {
     if (wsRef.current) {
@@ -129,6 +244,7 @@ function Chat({ toggleTheme }) {
         user: username,
         text: "",
         timestamp: new Date().toISOString(),
+        room_id: selectedRoom?.id,
       };
 
       wsRef.current.send(JSON.stringify(typingMessage));
@@ -144,6 +260,7 @@ function Chat({ toggleTheme }) {
             user: username,
             text: "",
             timestamp: new Date().toISOString(),
+            room_id: selectedRoom?.id,
           };
           wsRef.current.send(JSON.stringify(stopTypingMessage));
         }
@@ -153,19 +270,21 @@ function Chat({ toggleTheme }) {
 
   const sendMessage = (e) => {
     e.preventDefault();
-    if (!messageInput.trim() || !wsRef.current) return;
+    if (!messageInput.trim() || !wsRef.current || !selectedRoom) return;
 
     const message = {
       message_type: "chat",
       user: username,
       text: messageInput.trim(),
       timestamp: new Date().toISOString(),
+      room_id: selectedRoom.id,
     };
 
     wsRef.current.send(JSON.stringify(message));
     setMessageInput("");
   };
 
+  // Login screen
   if (!username) {
     return (
       <motion.div
@@ -243,135 +362,249 @@ function Chat({ toggleTheme }) {
         </Box>
       </motion.div>
     );
-  }
-
+  } // Main chat interface
   return (
     <ChatContainer>
-      <Header>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            Chat Room {connected ? "(Connected)" : "(Disconnected)"}
-          </Typography>
-          <Box sx={{ display: "flex", gap: 1 }}>
-            <AnimatePresence>
-              {Array.from(onlineUsers).map((user) => (
-                <motion.div
-                  key={user}
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 300 }}
-                >
-                  <UserChip isOnline>
-                    <Avatar
-                      src={`https://ui-avatars.com/api/?name=${encodeURIComponent(
-                        user
-                      )}&background=random`}
-                      sx={{ width: 24, height: 24 }}
-                    />
-                    <Typography variant="body2">{user}</Typography>
-                  </UserChip>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </Box>
-        </Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            {username}
-          </Typography>
-          <IconButton onClick={toggleTheme} size="small">
-            {theme.palette.mode === "dark" ? (
-              <LightModeIcon />
-            ) : (
-              <DarkModeIcon />
-            )}
-          </IconButton>
-        </Box>
-      </Header>
+      <Box sx={{ display: "flex", height: "100vh" }}>
+        {/* Sidebar */}
+        <RoomList
+          rooms={rooms}
+          selectedRoom={selectedRoom}
+          onRoomSelect={async (room) => {
+            setSelectedRoom(room);
+            try {
+              const response = await fetch(
+                `http://localhost:8080/api/rooms/${room.id}/join`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ username }),
+                }
+              );
 
-      <ChatArea ref={messageAreaRef}>
-        <AnimatePresence>
-          {messages.map((msg, index) => (
-            <motion.div
-              key={index}
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: -20, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 500 }}
+              if (response.ok) {
+                await fetchRoomHistory(room.id);
+
+                if (wsRef.current) {
+                  const joinMessage = {
+                    message_type: "join",
+                    user: username,
+                    text: `${username} joined ${room.name}`,
+                    timestamp: new Date().toISOString(),
+                    room_id: room.id,
+                  };
+                  wsRef.current.send(JSON.stringify(joinMessage));
+                }
+              }
+            } catch (error) {
+              console.error("Failed to join room:", error);
+            }
+          }}
+          onCreateRoom={() => setOpenNewRoomDialog(true)}
+        />
+
+        {/* Main Chat Area */}
+        <Box sx={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          <Header>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                width: "100%",
+              }}
             >
-              <MessageContainer isOwn={msg.user === username}>
-                <MessageBubble isOwn={msg.user === username}>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 1,
-                      mb: 0.5,
-                    }}
-                  >
-                    <Avatar src={msg.avatar} sx={{ width: 24, height: 24 }} />
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {msg.user}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {formatMessageTime(msg.timestamp)}
-                    </Typography>
-                  </Box>
-                  <Typography variant="body1">{msg.text}</Typography>
-                </MessageBubble>
-              </MessageContainer>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </ChatArea>
-
-      <InputArea>
-        <Box
-          component="form"
-          onSubmit={sendMessage}
-          sx={{ display: "flex", gap: 2 }}
-        >
-          <StyledTextField
-            fullWidth
-            value={messageInput}
-            onChange={(e) => {
-              setMessageInput(e.target.value);
-              handleTyping();
-            }}
-            placeholder="Type a message..."
-            disabled={!connected}
-            InputProps={{
-              endAdornment: (
-                <IconButton
-                  type="submit"
-                  disabled={!connected || !messageInput.trim()}
-                  color="primary"
-                >
-                  <SendRoundedIcon />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {selectedRoom ? selectedRoom.name : "Select a Room"}{" "}
+                  {connected ? "(Connected)" : "(Disconnected)"}
+                </Typography>
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <AnimatePresence>
+                    {Array.from(onlineUsers).map((user) => (
+                      <motion.div
+                        key={user}
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.8, opacity: 0 }}
+                        transition={{ type: "spring", stiffness: 300 }}
+                      >
+                        <UserChip isOnline>
+                          <Avatar
+                            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(
+                              user
+                            )}&background=random`}
+                            sx={{ width: 24, height: 24 }}
+                          />
+                          <Typography variant="body2">{user}</Typography>
+                        </UserChip>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </Box>
+              </Box>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  {username}
+                </Typography>
+                <IconButton onClick={toggleTheme} size="small">
+                  {theme.palette.mode === "dark" ? (
+                    <LightModeIcon />
+                  ) : (
+                    <DarkModeIcon />
+                  )}
                 </IconButton>
-              ),
-            }}
-          />
-        </Box>
-        <AnimatePresence>
-          {typingUsers.size > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-            >
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ mt: 1, display: "block" }}
+              </Box>
+            </Box>
+          </Header>
+
+          <ChatArea ref={messageAreaRef}>
+            {hasMoreMessages && (
+              <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
+                <Button
+                  onClick={loadMoreMessages}
+                  disabled={isLoadingHistory}
+                  variant="outlined"
+                  size="small"
+                  sx={{ mb: 2 }}
+                >
+                  Load More Messages
+                </Button>
+              </Box>
+            )}
+
+            {isLoadingHistory ? (
+              <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : (
+              <AnimatePresence>
+                {messages
+                  .filter(
+                    (msg) => !selectedRoom || msg.room_id === selectedRoom.id
+                  )
+                  .map((msg, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={{ y: -20, opacity: 0 }}
+                      transition={{ type: "spring", stiffness: 500 }}
+                    >
+                      <MessageContainer isOwn={msg.user === username}>
+                        <MessageBubble isOwn={msg.user === username}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1,
+                              mb: 0.5,
+                            }}
+                          >
+                            <Avatar
+                              src={msg.avatar}
+                              sx={{ width: 24, height: 24 }}
+                            />
+                            <Typography
+                              variant="body2"
+                              sx={{ fontWeight: 600 }}
+                            >
+                              {msg.user}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {formatMessageTime(msg.timestamp)}
+                            </Typography>
+                          </Box>
+                          <Typography variant="body1">{msg.text}</Typography>
+                        </MessageBubble>
+                      </MessageContainer>
+                    </motion.div>
+                  ))}
+              </AnimatePresence>
+            )}
+
+            {typingUsers.size > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
               >
-                {Array.from(typingUsers).join(", ")} typing...
-              </Typography>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </InputArea>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mt: 1, display: "block", textAlign: "center" }}
+                >
+                  {Array.from(typingUsers).join(", ")} typing...
+                </Typography>
+              </motion.div>
+            )}
+          </ChatArea>
+
+          <InputArea>
+            <Box
+              component="form"
+              onSubmit={sendMessage}
+              sx={{ display: "flex", gap: 2 }}
+            >
+              <StyledTextField
+                fullWidth
+                value={messageInput}
+                onChange={(e) => {
+                  setMessageInput(e.target.value);
+                  handleTyping();
+                }}
+                placeholder={
+                  selectedRoom
+                    ? "Type a message..."
+                    : "Select a room to start chatting"
+                }
+                disabled={!connected || !selectedRoom}
+                InputProps={{
+                  endAdornment: (
+                    <IconButton
+                      type="submit"
+                      disabled={
+                        !connected || !messageInput.trim() || !selectedRoom
+                      }
+                      color="primary"
+                    >
+                      <SendRoundedIcon />
+                    </IconButton>
+                  ),
+                }}
+              />
+            </Box>
+            <AnimatePresence>
+              {typingUsers.size > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                >
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ mt: 1, display: "block" }}
+                  >
+                    {Array.from(typingUsers).join(", ")} typing...
+                  </Typography>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </InputArea>
+        </Box>
+      </Box>
+
+      <RoomDialog
+        open={openNewRoomDialog}
+        onClose={() => setOpenNewRoomDialog(false)}
+        onCreate={handleCreateRoom}
+      />
     </ChatContainer>
   );
 }

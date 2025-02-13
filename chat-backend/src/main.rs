@@ -12,6 +12,7 @@ use deadpool_postgres::Pool;
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
 use actix_web::error::ErrorInternalServerError;
+use crate::utils::avatar::generate_avatar_url;
 
 use actix_cors::Cors;
 use dotenv::dotenv;
@@ -69,6 +70,7 @@ async fn get_rooms(
 
     Ok(HttpResponse::Ok().json(rooms))
 }
+
 
 async fn create_room(
     body: web::Json<CreateRoomRequest>,
@@ -147,6 +149,47 @@ async fn get_room_messages(
     Ok(HttpResponse::Ok().json(messages))
 }
 
+async fn load_chat_history(
+    room_id: i32,
+    limit: i64,
+    db_pool: &deadpool_postgres::Pool,
+) -> Result<Vec<ChatMessage>, Box<dyn std::error::Error>> {
+    let client = db_pool.get().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    
+    let rows = client.query(
+        "SELECT sender_id, content, created_at 
+         FROM messages 
+         WHERE room_id = $1 
+         ORDER BY created_at DESC 
+         LIMIT $2",
+        &[&room_id, &limit]
+    ).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+    let messages = rows.iter().map(|row| ChatMessage {
+        message_type: MessageType::Chat,
+        user: row.get(0),
+        text: row.get(1),
+        timestamp: row.get(2),
+        avatar: generate_avatar_url(&row.get::<_, String>(0)),
+        users: None,
+        room_id: Some(room_id),
+    }).collect();
+
+    Ok(messages)
+}
+
+async fn get_room_history(
+    path: web::Path<(i32, i64)>,
+    db: web::Data<deadpool_postgres::Pool>,
+) -> Result<HttpResponse, Error> {
+    let (room_id, limit) = path.into_inner();
+    
+    match load_chat_history(room_id, limit, &db).await {
+        Ok(messages) => Ok(HttpResponse::Ok().json(messages)),
+        Err(_) => Ok(HttpResponse::InternalServerError().finish())
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -184,6 +227,8 @@ async fn main() -> std::io::Result<()> {
             .route("/api/rooms", web::post().to(create_room))
             .route("/api/rooms/{id}/join", web::post().to(join_room))
             .route("/api/rooms/{id}/messages", web::get().to(get_room_messages))
+            .wrap(actix_web::middleware::Logger::default())
+            .route("/api/rooms/{id}/history/{limit}", web::get().to(get_room_history))
             .wrap(actix_web::middleware::Logger::default())
     })
     .bind("127.0.0.1:8080")?

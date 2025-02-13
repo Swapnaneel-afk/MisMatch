@@ -1,13 +1,15 @@
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
-use rand::Rng;
 use std::sync::{Arc, Mutex};
+use deadpool_postgres::Pool;
 use crate::models::session::ChatSession;
+use rand::Rng;  // Add this import
 
 pub async fn chat_route(
     req: HttpRequest,
     stream: web::Payload,
     srv: web::Data<Arc<Mutex<Vec<(String, actix::Addr<ChatSession>)>>>>,
+    db_pool: web::Data<Pool>,
 ) -> Result<HttpResponse, Error> {
     let username = req.query_string()
         .split('=')
@@ -26,6 +28,7 @@ pub async fn chat_route(
             id: rand::thread_rng().gen_range(1..=1000),
             username,
             addr: srv.get_ref().clone(),
+            db_pool: Arc::new(db_pool.get_ref().clone()),
         },
         &req,
         stream,
