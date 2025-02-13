@@ -1,9 +1,36 @@
-use crate::models::message::{ChatMessage, MessageType};
+
 use crate::models::session::{ChatSession, WsMessage};
 use crate::utils::avatar::generate_avatar_url;
 use actix::{Actor, Handler, StreamHandler, AsyncContext, ActorContext};
 use actix_web_actors::ws;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageType {
+    Chat,
+    Join,
+    Leave,
+    Typing,
+    StopTyping,
+    UserList  // Add this variant
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChatMessage {
+    pub message_type: MessageType,
+    pub user: String,
+    pub text: String,
+    pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub avatar: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub users: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<i32>,
+}
 
 impl Actor for ChatSession {
     type Context = ws::WebsocketContext<Self>;
@@ -27,6 +54,7 @@ impl Actor for ChatSession {
             timestamp: Utc::now(),
             avatar: generate_avatar_url("system"),
             users: Some(current_users),
+            room_id: None,  // Add this
         };
 
         // Send user list only to the new user
@@ -42,6 +70,7 @@ impl Actor for ChatSession {
             timestamp: Utc::now(),
             avatar: generate_avatar_url(&self.username),
             users: None,
+            room_id: None,  // Add this
         };
 
         let msg = serde_json::to_string(&join_message).unwrap();
@@ -61,6 +90,7 @@ impl Actor for ChatSession {
             timestamp: Utc::now(),
             avatar: generate_avatar_url(&self.username),
             users: None,
+            room_id: None,  // Add this
         };
 
         let msg = serde_json::to_string(&leave_message).unwrap();
