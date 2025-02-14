@@ -1,5 +1,5 @@
 pub mod schema;
-
+pub(crate) mod models;
 use deadpool_postgres::{Config, Pool, Runtime};
 use tokio_postgres::NoTls;
 use std::env;

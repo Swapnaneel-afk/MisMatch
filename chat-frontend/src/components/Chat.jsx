@@ -6,13 +6,14 @@ import {
   Avatar,
   useTheme,
   Button,
-  CircularProgress, // Add this
 } from "@mui/material";
 import { motion, AnimatePresence } from "framer-motion";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import { CircularProgress } from "@mui/material";
 import { format } from "date-fns";
+
 import {
   ChatContainer,
   Header,
@@ -37,9 +38,13 @@ function Chat({ toggleTheme }) {
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [openNewRoomDialog, setOpenNewRoomDialog] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [page, setPage] = useState(1);
+
+  ////
+  const [messagesByRoom, setMessagesByRoom] = useState({});
+  const [typingByRoom, setTypingByRoom] = useState({});
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   // Refs
   const wsRef = useRef(null);
@@ -51,19 +56,19 @@ function Chat({ toggleTheme }) {
   const formatMessageTime = (timestamp) => {
     return format(new Date(timestamp), "HH:mm");
   };
-
+  // Add after your existing utility functions
   const fetchRoomHistory = async (roomId) => {
     setIsLoadingHistory(true);
     try {
       const response = await fetch(
-        `http://localhost:8080/api/rooms/${roomId}/history/50`
+        `http://localhost:8080/api/rooms/${roomId}/messages`
       );
       if (response.ok) {
         const history = await response.json();
-        setMessages((prevMessages) => [
-          ...history,
-          ...prevMessages.filter((msg) => msg.room_id !== roomId),
-        ]);
+        setMessagesByRoom((prev) => ({
+          ...prev,
+          [roomId]: history,
+        }));
       }
     } catch (error) {
       console.error("Failed to fetch room history:", error);
@@ -71,24 +76,82 @@ function Chat({ toggleTheme }) {
       setIsLoadingHistory(false);
     }
   };
+  const loadMoreMessages = async (roomId) => {
+    if (!roomId || isLoadingHistory) return;
 
-  const loadMoreMessages = async () => {
-    if (!selectedRoom || !hasMoreMessages) return;
-
+    setIsLoadingHistory(true);
     try {
+      const oldestMessage = messagesByRoom[roomId]?.[0];
       const response = await fetch(
-        `http://localhost:8080/api/rooms/${selectedRoom.id}/history/50?page=${page}`
+        `http://localhost:8080/api/rooms/${roomId}/messages?before=${oldestMessage?.timestamp}&limit=20`
       );
+
       if (response.ok) {
         const history = await response.json();
-        if (history.length < 50) {
+        if (history.length < 20) {
           setHasMoreMessages(false);
         }
-        setMessages((prevMessages) => [...history, ...prevMessages]);
-        setPage((prev) => prev + 1);
+
+        setMessagesByRoom((prev) => ({
+          ...prev,
+          [roomId]: [...history, ...(prev[roomId] || [])],
+        }));
+
+        // Maintain scroll position
+        if (messageAreaRef.current && history.length > 0) {
+          const firstNewMessage = document.getElementById(
+            `message-${history[0].id}`
+          );
+          if (firstNewMessage) {
+            firstNewMessage.scrollIntoView();
+          }
+        }
       }
     } catch (error) {
       console.error("Failed to load more messages:", error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+  // Replace the RoomList onRoomSelect prop
+  const handleRoomSelect = async (room) => {
+    setSelectedRoom(room);
+    setHasMoreMessages(true); // Reset pagination when switching rooms
+    setPage(1);
+
+    try {
+      // Join the room
+      const response = await fetch(
+        `http://localhost:8080/api/rooms/${room.id}/join`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ username }),
+        }
+      );
+
+      if (response.ok) {
+        // Fetch room history if we haven't already
+        if (!messagesByRoom[room.id]) {
+          await fetchRoomHistory(room.id);
+        }
+
+        // Send join message through WebSocket
+        if (wsRef.current) {
+          const joinMessage = {
+            message_type: "join",
+            user: username,
+            text: `${username} joined ${room.name}`,
+            timestamp: new Date().toISOString(),
+            room_id: room.id,
+          };
+          wsRef.current.send(JSON.stringify(joinMessage));
+        }
+      }
+    } catch (error) {
+      console.error("Failed to join room:", error);
     }
   };
 
@@ -112,9 +175,42 @@ function Chat({ toggleTheme }) {
     }
   }, [connected]);
 
+  useEffect(() => {
+    if (!connected) return;
+
+    const refreshRooms = async () => {
+      try {
+        const response = await fetch("http://localhost:8080/api/rooms");
+        if (response.ok) {
+          const roomsList = await response.json();
+          setRooms(roomsList);
+        }
+      } catch (error) {
+        console.error("Failed to refresh rooms:", error);
+      }
+    };
+
+    // Refresh rooms every 30 seconds
+    const intervalId = setInterval(refreshRooms, 30000);
+
+    return () => clearInterval(intervalId);
+  }, [connected]);
+
   // WebSocket connection effect
   useEffect(() => {
     if (!username) return;
+
+    const refreshRooms = async () => {
+      try {
+        const response = await fetch("http://localhost:8080/api/rooms");
+        if (response.ok) {
+          const roomsList = await response.json();
+          setRooms(roomsList);
+        }
+      } catch (error) {
+        console.error("Failed to refresh rooms:", error);
+      }
+    };
 
     const WS_URL =
       process.env.NODE_ENV === "production"
@@ -135,12 +231,67 @@ function Chat({ toggleTheme }) {
       console.log("Received message:", message);
 
       switch (message.message_type) {
+        case "new_room":
+          setRooms((prev) => [...prev, message.room]);
+          break;
+
+        case "room_list":
+          setRooms(message.rooms);
+          break;
         case "chat":
-          setMessages((prev) =>
-            [...prev, message].sort(
-              (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-            )
-          );
+          if (message.room_id) {
+            setMessagesByRoom((prev) => ({
+              ...prev,
+              [message.room_id]: [...(prev[message.room_id] || []), message],
+            }));
+
+            // Auto-scroll for new messages
+            if (
+              messageAreaRef.current &&
+              message.room_id === selectedRoom?.id
+            ) {
+              setTimeout(() => {
+                messageAreaRef.current.scrollTop =
+                  messageAreaRef.current.scrollHeight;
+              }, 100);
+            }
+          }
+          break;
+
+        case "typing":
+          if (message.room_id && message.user !== username) {
+            setTypingByRoom((prev) => ({
+              ...prev,
+              [message.room_id]: {
+                ...prev[message.room_id],
+                [message.user]: true,
+              },
+            }));
+          }
+          break;
+
+        case "stop_typing":
+          if (message.room_id && message.user !== username) {
+            setTypingByRoom((prev) => ({
+              ...prev,
+              [message.room_id]: {
+                ...prev[message.room_id],
+                [message.user]: false,
+              },
+            }));
+          }
+          break;
+
+        case "join":
+          setOnlineUsers((prev) => new Set([...prev, message.user]));
+          break;
+
+        case "leave":
+          setOnlineUsers((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(message.user);
+            return newSet;
+          });
           break;
 
         case "user_list":
@@ -148,39 +299,6 @@ function Chat({ toggleTheme }) {
             setOnlineUsers(new Set(message.users));
           }
           break;
-        case "typing":
-          if (message.user !== username) {
-            setTypingUsers((prev) => new Set([...prev, message.user]));
-          }
-          break;
-        case "stop_typing":
-          setTypingUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(message.user);
-            return newSet;
-          });
-          break;
-        case "join":
-          setOnlineUsers((prev) => new Set([...prev, message.user]));
-          setMessages((prev) => [...prev, message]);
-          break;
-        case "leave":
-          setOnlineUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(message.user);
-            return newSet;
-          });
-          setMessages((prev) => [...prev, message]);
-          break;
-        case "chat":
-          setMessages((prev) => [...prev, message]);
-          break;
-        default:
-          console.log("Unknown message type:", message.message_type);
-      }
-
-      if (messageAreaRef.current && message.message_type === "chat") {
-        messageAreaRef.current.scrollTop = messageAreaRef.current.scrollHeight;
       }
     };
 
@@ -204,7 +322,7 @@ function Chat({ toggleTheme }) {
   // Handlers
   const handleCreateRoom = async (roomData) => {
     try {
-      console.log("Creating room with data:", roomData); // Debug log
+      console.log("Creating room with data:", roomData);
 
       const response = await fetch("http://localhost:8080/api/rooms", {
         method: "POST",
@@ -220,7 +338,7 @@ function Chat({ toggleTheme }) {
       });
 
       const responseText = await response.text();
-      console.log("Server response:", responseText); // Debug log
+      console.log("Server response:", responseText);
 
       if (!response.ok) {
         console.error("Failed to create room:", response.status, responseText);
@@ -229,6 +347,16 @@ function Chat({ toggleTheme }) {
 
       const newRoom = JSON.parse(responseText);
       console.log("Room created:", newRoom);
+
+      // Send new room notification through WebSocket
+      if (wsRef.current) {
+        const roomNotification = {
+          message_type: "new_room",
+          room: newRoom,
+        };
+        wsRef.current.send(JSON.stringify(roomNotification));
+      }
+
       setRooms((prev) => [...prev, newRoom]);
       setSelectedRoom(newRoom);
       setOpenNewRoomDialog(false);
@@ -370,38 +498,7 @@ function Chat({ toggleTheme }) {
         <RoomList
           rooms={rooms}
           selectedRoom={selectedRoom}
-          onRoomSelect={async (room) => {
-            setSelectedRoom(room);
-            try {
-              const response = await fetch(
-                `http://localhost:8080/api/rooms/${room.id}/join`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({ username }),
-                }
-              );
-
-              if (response.ok) {
-                await fetchRoomHistory(room.id);
-
-                if (wsRef.current) {
-                  const joinMessage = {
-                    message_type: "join",
-                    user: username,
-                    text: `${username} joined ${room.name}`,
-                    timestamp: new Date().toISOString(),
-                    room_id: room.id,
-                  };
-                  wsRef.current.send(JSON.stringify(joinMessage));
-                }
-              }
-            } catch (error) {
-              console.error("Failed to join room:", error);
-            }
-          }}
+          onRoomSelect={setSelectedRoom}
           onCreateRoom={() => setOpenNewRoomDialog(true)}
         />
 
@@ -461,33 +558,30 @@ function Chat({ toggleTheme }) {
           </Header>
 
           <ChatArea ref={messageAreaRef}>
-            {hasMoreMessages && (
+            {selectedRoom && hasMoreMessages && (
               <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
                 <Button
-                  onClick={loadMoreMessages}
+                  onClick={() => loadMoreMessages(selectedRoom.id)}
                   disabled={isLoadingHistory}
                   variant="outlined"
                   size="small"
                   sx={{ mb: 2 }}
                 >
-                  Load More Messages
+                  {isLoadingHistory ? "Loading..." : "Load More Messages"}
                 </Button>
               </Box>
             )}
-
             {isLoadingHistory ? (
               <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
                 <CircularProgress size={24} />
               </Box>
             ) : (
               <AnimatePresence>
-                {messages
-                  .filter(
-                    (msg) => !selectedRoom || msg.room_id === selectedRoom.id
-                  )
-                  .map((msg, index) => (
+                {selectedRoom &&
+                  messagesByRoom[selectedRoom.id]?.map((msg, index) => (
                     <motion.div
-                      key={index}
+                      key={`${msg.room_id}-${index}`}
+                      id={`message-${msg.id}`}
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
                       exit={{ y: -20, opacity: 0 }}
@@ -528,7 +622,7 @@ function Chat({ toggleTheme }) {
               </AnimatePresence>
             )}
 
-            {typingUsers.size > 0 && (
+            {selectedRoom && typingByRoom[selectedRoom.id] && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -539,7 +633,11 @@ function Chat({ toggleTheme }) {
                   color="text.secondary"
                   sx={{ mt: 1, display: "block", textAlign: "center" }}
                 >
-                  {Array.from(typingUsers).join(", ")} typing...
+                  {Object.entries(typingByRoom[selectedRoom.id])
+                    .filter(([_, isTyping]) => isTyping)
+                    .map(([user]) => user)
+                    .join(", ")}{" "}
+                  typing...
                 </Typography>
               </motion.div>
             )}

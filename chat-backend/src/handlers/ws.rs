@@ -1,35 +1,14 @@
-use crate::models::session::{ChatSession, WsMessage};
-use crate::utils::avatar::generate_avatar_url;
-use actix::{Actor, Handler, StreamHandler, AsyncContext, ActorContext};
-use actix_web_actors::ws;
-use chrono::{DateTime, Utc};
-use std::sync::Arc;  // Add this import
-use serde::{Serialize, Deserialize};
+    use crate::models::session::{ChatSession, WsMessage};
+    use crate::utils::avatar::generate_avatar_url;
+    use actix::{Actor, Handler, StreamHandler, AsyncContext, ActorContext};
+    use actix_web_actors::ws;
+    use chrono::Utc;
+    use std::sync::Arc;  // Add this import
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum MessageType {
-    Chat,
-    Join,
-    Leave,
-    Typing,
-    StopTyping,
-    UserList  // Add this variant
-}
+    use crate::models::message::{ChatMessage, MessageType};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChatMessage {
-    pub message_type: MessageType,
-    pub user: String,
-    pub text: String,
-    pub timestamp: DateTime<Utc>,
-    #[serde(default)]
-    pub avatar: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub users: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub room_id: Option<i32>,
-}
+
+
 
 impl Actor for ChatSession {
     type Context = ws::WebsocketContext<Self>;
@@ -53,7 +32,8 @@ impl Actor for ChatSession {
             timestamp: Utc::now(),
             avatar: generate_avatar_url("system"),
             users: Some(current_users),
-            room_id: None,  // Add this
+            room_id: None,
+            room: None,  // Add this
         };
 
         // Send user list only to the new user
@@ -70,6 +50,7 @@ impl Actor for ChatSession {
             avatar: generate_avatar_url(&self.username),
             users: None,
             room_id: None,  // Add this
+            room : None ,
         };
 
         let msg = serde_json::to_string(&join_message).unwrap();
@@ -90,6 +71,7 @@ impl Actor for ChatSession {
             avatar: generate_avatar_url(&self.username),
             users: None,
             room_id: None,  // Add this
+            room : None ,
         };
 
         let msg = serde_json::to_string(&leave_message).unwrap();
@@ -113,45 +95,55 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
             Ok(ws::Message::Text(text)) => {
                 match serde_json::from_str::<ChatMessage>(&text) {
                     Ok(mut chat_message) => {
-                        chat_message.user = self.username.clone();
-                        chat_message.timestamp = Utc::now();
-                        chat_message.avatar = generate_avatar_url(&self.username);
+                        match chat_message.message_type {
+                            MessageType::NewRoom => {
+                                // Broadcast the new room to all connected clients
+                                let connections = self.addr.lock().unwrap();
+                                for (_, addr) in connections.iter() {
+                                    addr.do_send(WsMessage(text.to_string()));
+                                }
+                            },
+                            _ => {
+                                chat_message.user = self.username.clone();
+                                chat_message.timestamp = Utc::now();
+                                chat_message.avatar = generate_avatar_url(&self.username);
 
-                        // Save chat message to database
-                        if let MessageType::Chat = chat_message.message_type {
-                            if let Some(room_id) = chat_message.room_id {
-                                let db_pool = Arc::clone(&self.db_pool);
-                                let content = chat_message.text.clone();
-                                let sender_id = chat_message.user.clone();
-                                
-                                // Spawn a new task to handle database operation
-                                let fut = async move {
-                                    if let Ok(client) = db_pool.get().await {
-                                        let _ = client.execute(
-                                            "INSERT INTO messages (room_id, sender_id, content) VALUES ($1, $2, $3)",
-                                            &[&room_id, &sender_id, &content]
-                                        ).await;
+                                // Save chat message to database
+                                if let MessageType::Chat = chat_message.message_type {
+                                    if let Some(room_id) = chat_message.room_id {
+                                        let db_pool = Arc::clone(&self.db_pool);
+                                        let content = chat_message.text.clone();
+                                        let sender_id = chat_message.user.clone();
+                                        
+                                        let fut = async move {
+                                            if let Ok(client) = db_pool.get().await {
+                                                let _ = client.execute(
+                                                    "INSERT INTO messages (room_id, sender_id, content) VALUES ($1, $2, $3)",
+                                                    &[&room_id, &sender_id, &content]
+                                                ).await;
+                                            }
+                                        };
+                                        actix_web::rt::spawn(fut);
                                     }
-                                };
-                                actix_web::rt::spawn(fut);
-                            }
-                        }
+                                }
 
-                        // Broadcast message
-                        if let Ok(msg) = serde_json::to_string(&chat_message) {
-                            let connections = self.addr.lock().unwrap();
-                            
-                            match chat_message.message_type {
-                                MessageType::Typing | MessageType::StopTyping => {
-                                    for (username, addr) in connections.iter() {
-                                        if username != &self.username {
-                                            addr.do_send(WsMessage(msg.clone()));
+                                // Broadcast message
+                                if let Ok(msg) = serde_json::to_string(&chat_message) {
+                                    let connections = self.addr.lock().unwrap();
+                                    
+                                    match chat_message.message_type {
+                                        MessageType::Typing | MessageType::StopTyping => {
+                                            for (username, addr) in connections.iter() {
+                                                if username != &self.username {
+                                                    addr.do_send(WsMessage(msg.clone()));
+                                                }
+                                            }
+                                        },
+                                        _ => {
+                                            for (_, addr) in connections.iter() {
+                                                addr.do_send(WsMessage(msg.clone()));
+                                            }
                                         }
-                                    }
-                                },
-                                _ => {
-                                    for (_, addr) in connections.iter() {
-                                        addr.do_send(WsMessage(msg.clone()));
                                     }
                                 }
                             }
@@ -162,7 +154,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
                         println!("Problematic message text: {}", text);
                     }
                 }
-            }
+            } 
             Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
             Ok(ws::Message::Pong(_)) => (),
             Ok(ws::Message::Close(reason)) => {

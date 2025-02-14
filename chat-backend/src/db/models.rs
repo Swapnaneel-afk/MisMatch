@@ -1,13 +1,13 @@
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]  // Add Clone here
 pub struct Room {
     pub id: i32,
     pub name: String,
-    pub room_type: RoomType,
+    pub room_type: String,
     pub password_hash: Option<String>,
-    pub created_by: i32,
+    pub created_by: String,
     pub created_at: DateTime<Utc>,
 }
 

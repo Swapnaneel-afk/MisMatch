@@ -3,6 +3,8 @@ mod handlers;
 mod utils;
 mod db;
 
+
+
 use actix_web::{web, App, HttpServer, HttpResponse, Error};
 use std::sync::{Arc, Mutex};
 use crate::handlers::http::chat_route;
@@ -49,29 +51,6 @@ async fn health_check() -> HttpResponse {
     }))
 }
 
-async fn get_rooms(
-    db: web::Data<Pool>,
-) -> Result<HttpResponse, Error> {
-    let client = db.get().await.map_err(ErrorInternalServerError)?;
-
-    let rows = client.query(
-        "SELECT id, name, room_type, password_hash, created_by, created_at FROM rooms ORDER BY created_at DESC",
-        &[],
-    ).await.map_err(ErrorInternalServerError)?;
-
-    let rooms: Vec<Room> = rows.iter().map(|row| Room {
-        id: row.get(0),
-        name: row.get(1),
-        room_type: row.get(2),
-        password_hash: row.get(3),
-        created_by: row.get(4),
-        created_at: row.get(5),
-    }).collect();
-
-    Ok(HttpResponse::Ok().json(rooms))
-}
-
-
 async fn create_room(
     body: web::Json<CreateRoomRequest>,
     db: web::Data<Pool>,
@@ -102,6 +81,31 @@ async fn create_room(
 
     Ok(HttpResponse::Ok().json(room))
 }
+
+async fn get_rooms(
+    db: web::Data<Pool>,
+) -> Result<HttpResponse, Error> {
+    let client = db.get().await.map_err(ErrorInternalServerError)?;
+
+    let rows = client.query(
+        "SELECT id, name, room_type, password_hash, created_by, created_at FROM rooms ORDER BY created_at DESC",
+        &[],
+    ).await.map_err(ErrorInternalServerError)?;
+
+    let rooms: Vec<Room> = rows.iter().map(|row| Room {
+        id: row.get(0),
+        name: row.get(1),
+        room_type: row.get(2),
+        password_hash: row.get(3),
+        created_by: row.get(4),
+        created_at: row.get(5),
+    }).collect();
+
+    Ok(HttpResponse::Ok().json(rooms))
+}
+
+
+
 
 async fn join_room(
     path: web::Path<i32>,
@@ -144,6 +148,7 @@ async fn get_room_messages(
         avatar: format!("https://ui-avatars.com/api/?name={}&background=random", 
             urlencoding::encode(&row.get::<_, String>(0))),
         users: None,
+        room: None,
     }).collect();
 
     Ok(HttpResponse::Ok().json(messages))
@@ -173,6 +178,7 @@ async fn load_chat_history(
         avatar: generate_avatar_url(&row.get::<_, String>(0)),
         users: None,
         room_id: Some(room_id),
+        room : None ,
     }).collect();
 
     Ok(messages)
@@ -228,6 +234,7 @@ async fn main() -> std::io::Result<()> {
             .route("/api/rooms/{id}/join", web::post().to(join_room))
             .route("/api/rooms/{id}/messages", web::get().to(get_room_messages))
             .wrap(actix_web::middleware::Logger::default())
+            .route("/api/rooms", web::post().to(create_room))
             .route("/api/rooms/{id}/history/{limit}", web::get().to(get_room_history))
             .wrap(actix_web::middleware::Logger::default())
     })
