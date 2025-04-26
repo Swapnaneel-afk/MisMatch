@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { format } from "date-fns";
 import {
   ChatContainer,
@@ -23,11 +24,10 @@ import {
   UserChip,
 } from "./StyledComponents";
 
-function Chat({ toggleTheme }) {
+function Chat({ toggleTheme, username, roomId, roomName, onBackToRooms }) {
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState("");
   const [connected, setConnected] = useState(false);
-  const [username, setUsername] = useState("");
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [typingUsers, setTypingUsers] = useState(new Set());
   const wsRef = useRef(null);
@@ -40,16 +40,16 @@ function Chat({ toggleTheme }) {
   };
 
   useEffect(() => {
-    if (!username) return;
+    if (!username || !roomId) return;
 
     const WS_URL =
       process.env.NODE_ENV === "production"
         ? "wss://mismatch-production.up.railway.app"
         : "ws://127.0.0.1:8080";
 
-    // In your useEffect:
+    // Connect to WebSocket with username and roomId
     wsRef.current = new WebSocket(
-      `${WS_URL}/ws?username=${encodeURIComponent(username)}`
+      `${WS_URL}/ws?username=${encodeURIComponent(username)}&roomId=${roomId}`
     );
 
     wsRef.current.onopen = () => {
@@ -115,12 +115,37 @@ function Chat({ toggleTheme }) {
       console.error("WebSocket error:", error);
     };
 
+    // Fetch previous messages for this room
+    const fetchMessages = async () => {
+      try {
+        const API_URL = process.env.NODE_ENV === "production"
+          ? "https://mismatch-production.up.railway.app/api"
+          : "http://localhost:8080/api";
+        
+        const response = await fetch(`${API_URL}/rooms/${roomId}/messages`);
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+          setMessages(data.data.map(msg => ({
+            message_type: "chat",
+            user: msg.sender_username || "Unknown",
+            text: msg.content,
+            timestamp: msg.created_at
+          })));
+        }
+      } catch (err) {
+        console.error("Error fetching messages:", err);
+      }
+    };
+    
+    fetchMessages();
+
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, [username]);
+  }, [username, roomId]);
 
   const handleTyping = () => {
     if (wsRef.current) {
@@ -129,6 +154,7 @@ function Chat({ toggleTheme }) {
         user: username,
         text: "",
         timestamp: new Date().toISOString(),
+        room_id: roomId
       };
 
       wsRef.current.send(JSON.stringify(typingMessage));
@@ -144,6 +170,7 @@ function Chat({ toggleTheme }) {
             user: username,
             text: "",
             timestamp: new Date().toISOString(),
+            room_id: roomId
           };
           wsRef.current.send(JSON.stringify(stopTypingMessage));
         }
@@ -160,97 +187,22 @@ function Chat({ toggleTheme }) {
       user: username,
       text: messageInput.trim(),
       timestamp: new Date().toISOString(),
+      room_id: roomId
     };
 
     wsRef.current.send(JSON.stringify(message));
     setMessageInput("");
   };
 
-  if (!username) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <Box
-          sx={{
-            height: "100vh",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background:
-              theme.palette.mode === "dark"
-                ? "linear-gradient(145deg, #000000 0%, #1a1a1a 100%)"
-                : "linear-gradient(145deg, #f6f6f6 0%, #ffffff 100%)",
-          }}
-        >
-          <Box
-            component={motion.div}
-            whileHover={{ scale: 1.02 }}
-            sx={{
-              p: 4,
-              borderRadius: 4,
-              width: "100%",
-              maxWidth: 400,
-              backdropFilter: "blur(10px)",
-              backgroundColor:
-                theme.palette.mode === "dark"
-                  ? "rgba(0, 0, 0, 0.8)"
-                  : "rgba(255, 255, 255, 0.8)",
-              boxShadow: "0 8px 32px 0 rgba(31, 38, 135, 0.37)",
-            }}
-          >
-            <Typography
-              variant="h4"
-              gutterBottom
-              align="center"
-              sx={{ fontWeight: 600 }}
-            >
-              Join Chat
-            </Typography>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const input = e.target.username.value.trim();
-                if (input) setUsername(input);
-              }}
-            >
-              <StyledTextField
-                name="username"
-                label="Username"
-                variant="outlined"
-                fullWidth
-                margin="normal"
-                autoFocus
-              />
-              <Button
-                type="submit"
-                variant="contained"
-                fullWidth
-                size="large"
-                sx={{
-                  mt: 2,
-                  height: 48,
-                  textTransform: "none",
-                  fontSize: "1.1rem",
-                }}
-              >
-                Join
-              </Button>
-            </form>
-          </Box>
-        </Box>
-      </motion.div>
-    );
-  }
-
   return (
     <ChatContainer>
       <Header>
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <IconButton onClick={onBackToRooms} size="small">
+            <ArrowBackIcon />
+          </IconButton>
           <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            Chat Room {connected ? "(Connected)" : "(Disconnected)"}
+            {roomName} {connected ? "(Connected)" : "(Disconnected)"}
           </Typography>
           <Box sx={{ display: "flex", gap: 1 }}>
             <AnimatePresence>
@@ -310,7 +262,12 @@ function Chat({ toggleTheme }) {
                       mb: 0.5,
                     }}
                   >
-                    <Avatar src={msg.avatar} sx={{ width: 24, height: 24 }} />
+                    <Avatar 
+                      src={`https://ui-avatars.com/api/?name=${encodeURIComponent(
+                        msg.user
+                      )}&background=random`} 
+                      sx={{ width: 24, height: 24 }} 
+                    />
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       {msg.user}
                     </Typography>
