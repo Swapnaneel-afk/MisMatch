@@ -124,7 +124,7 @@ pub async fn create_room(
     let new_room = Room {
         id: None,
         name: room_data.name.clone(),
-        room_type: room_data.room_type.clone(),
+        type_: room_data.room_type.clone(),
         password_hash,
         created_by: Some(*user_id),
         created_at: None,

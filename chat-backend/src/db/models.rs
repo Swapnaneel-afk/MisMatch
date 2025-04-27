@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, NaiveDateTime};
 use tokio_postgres::{Client, Error};
 
 // User Model
@@ -17,7 +17,7 @@ pub struct User {
 pub struct Room {
     pub id: Option<i32>,
     pub name: String,
-    pub room_type: String,
+    pub type_: String,
     pub password_hash: Option<String>,
     pub created_by: Option<i32>,
     pub created_at: Option<DateTime<Utc>>,
@@ -49,12 +49,15 @@ impl User {
             )
             .await?;
         
+        let created_at: Option<NaiveDateTime> = row.get(4);
+        let utc_created_at = created_at.map(|ndt| DateTime::<Utc>::from_utc(ndt, Utc));
+        
         Ok(User {
             id: Some(row.get(0)),
             username: row.get(1),
             password_hash: row.get(2),
             avatar_url: row.get(3),
-            created_at: row.get(4),
+            created_at: utc_created_at,
         })
     }
     
@@ -68,12 +71,15 @@ impl User {
             .await?;
         
         if let Some(row) = result {
+            let created_at: Option<NaiveDateTime> = row.get(4);
+            let utc_created_at = created_at.map(|ndt| DateTime::<Utc>::from_utc(ndt, Utc));
+            
             Ok(Some(User {
                 id: Some(row.get(0)),
                 username: row.get(1),
                 password_hash: row.get(2),
                 avatar_url: row.get(3),
-                created_at: row.get(4),
+                created_at: utc_created_at,
             }))
         } else {
             Ok(None)
@@ -86,32 +92,35 @@ impl Room {
     pub async fn create(client: &Client, room: &Room) -> Result<Room, Error> {
         let row = client
             .query_one(
-                "INSERT INTO rooms (name, type, password_hash, created_by) 
+                "INSERT INTO rooms (name, \"type\", password_hash, created_by) 
                  VALUES ($1, $2, $3, $4) 
-                 RETURNING id, name, type, password_hash, created_by, created_at",
+                 RETURNING id, name, \"type\", password_hash, created_by, created_at",
                 &[
                     &room.name,
-                    &room.room_type,
+                    &room.type_,
                     &room.password_hash,
                     &room.created_by,
                 ],
             )
             .await?;
         
+        let created_at: Option<NaiveDateTime> = row.get(5);
+        let utc_created_at = created_at.map(|ndt| DateTime::<Utc>::from_utc(ndt, Utc));
+        
         Ok(Room {
             id: Some(row.get(0)),
             name: row.get(1),
-            room_type: row.get(2),
+            type_: row.get(2),
             password_hash: row.get(3),
             created_by: row.get(4),
-            created_at: row.get(5),
+            created_at: utc_created_at,
         })
     }
     
     pub async fn find_all(client: &Client) -> Result<Vec<Room>, Error> {
         let rows = client
             .query(
-                "SELECT id, name, type, password_hash, created_by, created_at 
+                "SELECT id, name, \"type\", password_hash, created_by, created_at 
                  FROM rooms",
                 &[],
             )
@@ -119,13 +128,18 @@ impl Room {
         
         let rooms = rows
             .into_iter()
-            .map(|row| Room {
-                id: Some(row.get(0)),
-                name: row.get(1),
-                room_type: row.get(2),
-                password_hash: row.get(3),
-                created_by: row.get(4),
-                created_at: row.get(5),
+            .map(|row| {
+                let created_at: Option<NaiveDateTime> = row.get(5);
+                let utc_created_at = created_at.map(|ndt| DateTime::<Utc>::from_utc(ndt, Utc));
+                
+                Room {
+                    id: Some(row.get(0)),
+                    name: row.get(1),
+                    type_: row.get(2),
+                    password_hash: row.get(3),
+                    created_by: row.get(4),
+                    created_at: utc_created_at,
+                }
             })
             .collect();
         
@@ -167,12 +181,15 @@ impl Message {
             )
             .await?;
         
+        let created_at: Option<NaiveDateTime> = row.get(4);
+        let utc_created_at = created_at.map(|ndt| DateTime::<Utc>::from_utc(ndt, Utc));
+        
         Ok(Message {
             id: Some(row.get(0)),
             room_id: row.get(1),
             sender_id: row.get(2),
             content: row.get(3),
-            created_at: row.get(4),
+            created_at: utc_created_at,
         })
     }
     
@@ -190,12 +207,17 @@ impl Message {
         
         let messages = rows
             .into_iter()
-            .map(|row| Message {
-                id: Some(row.get(0)),
-                room_id: row.get(1),
-                sender_id: row.get(2),
-                content: row.get(3),
-                created_at: row.get(4),
+            .map(|row| {
+                let created_at: Option<NaiveDateTime> = row.get(4);
+                let utc_created_at = created_at.map(|ndt| DateTime::<Utc>::from_utc(ndt, Utc));
+                
+                Message {
+                    id: Some(row.get(0)),
+                    room_id: row.get(1),
+                    sender_id: row.get(2),
+                    content: row.get(3),
+                    created_at: utc_created_at,
+                }
             })
             .collect();
         
