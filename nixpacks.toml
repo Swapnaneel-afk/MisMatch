@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["gcc", "libiconv"]
+
+[phases.build]
+cmds = ["cd chat-backend && cargo build --release"]
+
+[start]
+cmd = "cd chat-backend && ./target/release/chat-backend" 

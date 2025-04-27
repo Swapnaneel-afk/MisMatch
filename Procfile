@@ -1,0 +1,1 @@
+web: cd chat-backend && RUST_LOG=info ./target/release/chat-backend 

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "watchPatterns": ["chat-backend/**"],
+    "nixpacksConfigPath": "nixpacks.toml"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "startCommand": "cd chat-backend && ./target/release/chat-backend",
+    "sleepApplication": false,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+} 

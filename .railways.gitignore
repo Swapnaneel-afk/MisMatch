@@ -1,0 +1,5 @@
+chat-frontend/
+README.md
+PROJECT_SUMMARY.md
+docker-compose.yml
+.dockerignore 

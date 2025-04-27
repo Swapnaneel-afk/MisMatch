@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd chat-backend && cargo build --release"
+
+[deploy]
+startCommand = "cd chat-backend && ./target/release/chat-backend"
+restartPolicyType = "on_failure"
+
+[nixpacks]
+rust-version = "latest" 
