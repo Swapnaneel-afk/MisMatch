@@ -26,24 +26,39 @@ See [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) for a detailed project overview.
 
 ## Deployment
 
-### Railway Deployment (Backend Only)
+### Railway Deployment
 
-We've configured the project to deploy only the backend to Railway:
+We've configured the project to deploy to Railway. However, Railway has limits on free resources.
 
-1. Make sure the `railway.toml`, `Procfile`, and `nixpacks.toml` files are in the root directory
-2. Push your code to GitHub
-3. Deploy from the Railway dashboard by connecting to your GitHub repository
-4. Railway will use these configuration files to build and deploy only the backend
+### Alternative Free Deployment Options
 
-For detailed instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+We've provided configurations for multiple free hosting options:
 
-### Frontend Deployment
+1. **Render.com**: 
+   - Configuration: `chat-backend/render.yaml`
+   - Deployment guide: `DEPLOYMENT-ALTERNATIVES.md`
+   - Deploy script: `deploy-to-render.ps1`
+
+2. **Fly.io**:
+   - Configuration: `chat-backend/fly.toml`
+   - Deployment guide: `DEPLOYMENT-ALTERNATIVES.md`
+
+3. **Shuttle.rs** (Rust-specific):
+   - Configuration: `chat-backend/Shuttle.toml`
+   - Deployment guide: `DEPLOYMENT-ALTERNATIVES.md`
+
+4. **Heroku**:
+   - Deployment guide: `DEPLOYMENT-ALTERNATIVES.md`
+
+For detailed instructions, see [DEPLOYMENT-ALTERNATIVES.md](DEPLOYMENT-ALTERNATIVES.md).
+
+## Frontend Deployment
 
 The frontend can be deployed separately to:
 - Vercel
 - Netlify
-- Another Railway service
-- Any other frontend hosting platform
+- GitHub Pages
+- Render.com
 
 Make sure to set the `REACT_APP_WS_URL` environment variable to point to your deployed backend's WebSocket URL.
 
