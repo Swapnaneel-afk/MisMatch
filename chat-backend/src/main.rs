@@ -28,33 +28,27 @@ async fn main() -> std::io::Result<()> {
     
     println!("Starting MisMatch backend server...");
 
-    // Create database pool
-    println!("Connecting to database...");
-    let pool = match db::create_pool().await {
-        Ok(pool) => {
-            println!("Database connected successfully");
-            pool
-        },
-        Err(e) => {
-            eprintln!("Failed to connect to database: {}", e);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Database connection error: {}", e)));
-        }
-    };
-
-    // Initialize database schema
-    println!("Initializing database schema...");
-    match pool.get().await {
-        Ok(client) => {
+    // Create database pool (optional)
+    println!("Attempting to connect to database...");
+    let pool_result = db::create_pool().await;
+    
+    let pool = if let Ok(pool) = pool_result {
+        println!("Database connected successfully");
+        // Try to initialize schema
+        if let Ok(client) = pool.get().await {
             if let Err(e) = db::schema::create_tables(&client).await {
-                eprintln!("Failed to create database tables: {}", e);
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Schema error: {}", e)));
+                eprintln!("Warning: Failed to create database tables: {}", e);
+                // Continue despite schema error
             }
-        },
-        Err(e) => {
-            eprintln!("Failed to get database client: {}", e);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Database client error: {}", e)));
+        } else {
+            eprintln!("Warning: Could not get database client for schema initialization");
+            // Continue despite client error
         }
-    }
+        Some(pool)
+    } else {
+        eprintln!("Warning: Failed to connect to database. Will operate without database.");
+        None
+    };
 
     // Create shared state for WebSocket connections
     let connections: Arc<Mutex<Vec<(String, actix::Addr<ChatSession>)>>> = 
@@ -84,13 +78,19 @@ async fn main() -> std::io::Result<()> {
             ])
             .supports_credentials();
 
-        App::new()
+        let app = App::new()
             .wrap(cors)
             .wrap(Logger::default())
             .app_data(web::Data::new(connections.clone()))
-            .app_data(web::Data::new(pool.clone()))
             .route("/ws", web::get().to(chat_route))
-            .route("/health", web::get().to(health_check))
+            .route("/health", web::get().to(health_check));
+            
+        // Add database pool to app data only if it's available
+        if let Some(pool) = &pool {
+            return app.app_data(web::Data::new(pool.clone()));
+        }
+        
+        app
     })
     .bind(bind_address)?
     .run()

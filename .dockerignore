@@ -11,9 +11,10 @@ yarn-debug.log
 yarn-error.log
 
 # Rust
-target/
+chat-backend/target/
 **/*.rs.bk
-Cargo.lock
+# Don't ignore Cargo.lock as it's needed for reproducible builds
+# Cargo.lock
 
 # Editor directories and files
 .idea/
@@ -21,19 +22,19 @@ Cargo.lock
 *.swp
 *.swo
 
-# Documentation
-README.md
-*.md
+# Documentation (but keep necessary .md files)
+# README.md
+# *.md
 LICENSE
 
-# Deployment configuration
-railway.toml
+# Deployment configuration (but keep necessary ones)
+# railway.toml
 render.yaml
-Procfile
-nixpacks.toml
+# Procfile
+# nixpacks.toml
 
 # Docker
 .dockerignore
 dockerfile*
-Dockerfile*
+# Keep Dockerfile
 !Dockerfile 

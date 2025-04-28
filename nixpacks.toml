@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["gcc", "libiconv"]
+aptPkgs = ["pkg-config", "libssl-dev"]
 
 [phases.build]
 cmds = ["cd chat-backend && cargo build --release"]
