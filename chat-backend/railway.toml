@@ -1,10 +1,7 @@
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "./target/release/chat-backend"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10 
+restartPolicyType = "ON_FAILURE" 

@@ -63,20 +63,21 @@ async fn main() -> std::io::Result<()> {
     // Create and start HTTP server
     HttpServer::new(move || {
         let cors = Cors::default()
-            .allowed_origin_fn(|origin, _req_head| {
-                // Allow all origins in development mode
-                let origin_str = origin.to_str().unwrap_or("");
-                origin_str.starts_with("http://localhost") || 
-                origin_str.contains("railway.app") ||
-                origin_str.starts_with("https://") 
-            })
-            .allowed_methods(vec!["GET", "POST"])
-            .allowed_headers(vec![
-                header::AUTHORIZATION,
-                header::ACCEPT,
-                header::CONTENT_TYPE
-            ])
-            .supports_credentials();
+        .allowed_origin_fn(|origin, _req_head| {
+            // Allow all origins in development mode
+            let origin_str = origin.to_str().unwrap_or("");
+            origin_str.starts_with("http://localhost") || 
+            origin_str.contains("railway.app") ||
+            origin_str.contains("vercel.app") ||   // Add this line to allow Vercel domains
+            origin_str.starts_with("https://") 
+        })
+        .allowed_methods(vec!["GET", "POST"])
+        .allowed_headers(vec![
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::CONTENT_TYPE
+        ])
+        .supports_credentials();
 
         let app = App::new()
             .wrap(cors)

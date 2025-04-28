@@ -42,11 +42,13 @@ function Chat({ toggleTheme }) {
   useEffect(() => {
     if (!username) return;
 
-    const WS_URL =
-      process.env.REACT_APP_WS_URL || 
-      (process.env.NODE_ENV === "production"
-        ? "wss://new-carpenter-production.up.railway.app/ws"
-        : "ws://127.0.0.1:8080/ws");
+    // Get the WebSocket URL from environment variable or use a fallback based on window.location
+    const WS_URL = process.env.REACT_APP_WS_URL || 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? `ws://${window.location.hostname}:8080/ws`
+        : `wss://${window.location.hostname.replace('vercel.app', 'up.railway.app')}/ws`);
+    
+    console.log('Attempting to connect to WebSocket at:', WS_URL);
 
     // In your useEffect:
     wsRef.current = new WebSocket(
@@ -54,7 +56,7 @@ function Chat({ toggleTheme }) {
     );
 
     wsRef.current.onopen = () => {
-      console.log("Connected to WebSocket");
+      console.log("Connected to WebSocket successfully");
       setConnected(true);
     };
 
@@ -105,8 +107,8 @@ function Chat({ toggleTheme }) {
       }
     };
 
-    wsRef.current.onclose = () => {
-      console.log("Disconnected from WebSocket");
+    wsRef.current.onclose = (event) => {
+      console.log("Disconnected from WebSocket", event.code, event.reason);
       setConnected(false);
       setOnlineUsers(new Set());
       setTypingUsers(new Set());
@@ -114,6 +116,16 @@ function Chat({ toggleTheme }) {
 
     wsRef.current.onerror = (error) => {
       console.error("WebSocket error:", error);
+      // Try to reconnect after 5 seconds if not connected
+      if (!connected) {
+        setTimeout(() => {
+          if (!connected && username) {
+            console.log("Attempting to reconnect...");
+            // The component will re-render and trigger this useEffect again
+            setUsername(prev => prev);
+          }
+        }, 5000);
+      }
     };
 
     return () => {
