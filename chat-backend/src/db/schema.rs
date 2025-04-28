@@ -13,7 +13,7 @@ pub async fn create_tables(client: &Client) -> Result<(), tokio_postgres::Error>
         CREATE TABLE IF NOT EXISTS rooms (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
-            type VARCHAR(50) NOT NULL CHECK (type IN ('public', 'private', 'protected')),
+            \"type\" VARCHAR(50) NOT NULL CHECK (\"type\" IN ('public', 'private', 'protected')),
             password_hash VARCHAR(255),
             created_by INTEGER REFERENCES users(id),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

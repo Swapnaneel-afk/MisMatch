@@ -6,6 +6,16 @@ use tokio_postgres::NoTls;
 use std::env;
 
 pub async fn create_pool() -> Result<Pool, CreatePoolError> {
+    // Hardcoded connection string for deployment
+    let database_url = "postgresql://postgres:zVotVSHvjVqNmTVXgesgBgrAqtAgTbSD@hopper.proxy.rlwy.net:13931/railway";
+    
+    // Parse the connection string
+    if let Ok(config) = deadpool_postgres::config::ConfigParser::parse_url(database_url) {
+        // Use the parsed configuration
+        return config.create_pool(Some(Runtime::Tokio1), NoTls);
+    }
+    
+    // Fallback to individual environment variables (should not reach here)
     let mut cfg = Config::new();
     cfg.host = Some(env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string()));
     cfg.port = Some(env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string()).parse().unwrap());

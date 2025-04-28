@@ -3,8 +3,9 @@ mod handlers;
 mod utils;
 mod db;
 
-use actix_web::{web, App, HttpServer, HttpResponse, middleware::Logger};
+use actix_web::{web, App, HttpServer, HttpResponse, middleware::Logger, rt::time};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use crate::handlers::http::chat_route;
 use crate::models::session::ChatSession;
 
@@ -30,25 +31,64 @@ async fn main() -> std::io::Result<()> {
 
     // Create database pool (optional)
     println!("Attempting to connect to database...");
-    let pool_result = db::create_pool().await;
     
-    let pool = if let Ok(pool) = pool_result {
-        println!("Database connected successfully");
-        // Try to initialize schema
-        if let Ok(client) = pool.get().await {
-            if let Err(e) = db::schema::create_tables(&client).await {
-                eprintln!("Warning: Failed to create database tables: {}", e);
-                // Continue despite schema error
+    let mut pool_option = None;
+    let mut retry_count = 0;
+    const MAX_RETRIES: u8 = 3;
+    
+    while retry_count < MAX_RETRIES {
+        match db::create_pool().await {
+            Ok(pool) => {
+                println!("Database connected successfully");
+                
+                // Try to initialize schema
+                match pool.get().await {
+                    Ok(client) => {
+                        match db::schema::create_tables(&client).await {
+                            Ok(_) => {
+                                println!("Database schema initialized successfully");
+                                pool_option = Some(pool);
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: Failed to create database tables: {}", e);
+                                // Try again or continue without schema
+                                if e.to_string().contains("syntax error") {
+                                    eprintln!("SQL syntax error detected in schema creation - please check your SQL statements");
+                                }
+                                pool_option = Some(pool);
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Could not get database client for schema initialization: {}", e);
+                        if retry_count + 1 < MAX_RETRIES {
+                            println!("Retrying database connection in 2 seconds...");
+                            time::sleep(Duration::from_secs(2)).await;
+                            retry_count += 1;
+                            continue;
+                        }
+                        // Continue despite client error
+                        pool_option = Some(pool);
+                        break;
+                    }
+                }
             }
-        } else {
-            eprintln!("Warning: Could not get database client for schema initialization");
-            // Continue despite client error
+            Err(e) => {
+                eprintln!("Warning: Failed to connect to database: {}", e);
+                if retry_count + 1 < MAX_RETRIES {
+                    println!("Retrying database connection in 2 seconds...");
+                    time::sleep(Duration::from_secs(2)).await;
+                    retry_count += 1;
+                    continue;
+                }
+                // Skip retries if we've reached max
+                eprintln!("Maximum retries reached. Will operate without database connection.");
+                break;
+            }
         }
-        Some(pool)
-    } else {
-        eprintln!("Warning: Failed to connect to database. Will operate without database.");
-        None
-    };
+    }
 
     // Create shared state for WebSocket connections
     let connections: Arc<Mutex<Vec<(String, actix::Addr<ChatSession>)>>> = 
@@ -87,7 +127,7 @@ async fn main() -> std::io::Result<()> {
             .route("/health", web::get().to(health_check));
             
         // Add database pool to app data only if it's available
-        if let Some(pool) = &pool {
+        if let Some(pool) = &pool_option {
             return app.app_data(web::Data::new(pool.clone()));
         }
         
