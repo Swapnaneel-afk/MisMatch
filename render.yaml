@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: mismatch-backend
+    env: rust
+    plan: free
+    region: oregon
+    buildCommand: cd chat-backend && cargo build --release
+    startCommand: cd chat-backend && ./target/release/chat-backend
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: RUST_LOG
+        value: info
+      - fromGroup: database-config
+
+databases:
+  - name: mismatch-db
+    plan: free
+    region: oregon
+    databaseName: mismatch
+    ipAllowList: []
+
+envVarGroups:
+  - name: database-config
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: mismatch-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: mismatch-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: mismatch-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: mismatch-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: mismatch-db
+          property: password 
