@@ -1,3 +1,64 @@
+# MisMatch Chat Frontend
+
+A modern real-time chat application built with React and WebSockets.
+
+## Deployment to Vercel
+
+### Prerequisites
+- [Vercel account](https://vercel.com/signup)
+- [GitHub account](https://github.com/) (for repository connection)
+
+### Deployment Steps
+
+1. Push your code to GitHub
+2. Sign up at [Vercel](https://vercel.com/)
+3. Create a new project and connect to your repository
+4. Set the "Root Directory" to "chat-frontend"
+5. Add the environment variable:
+   ```
+   REACT_APP_WS_URL=wss://new-carpenter-production.up.railway.app/ws
+   ```
+6. Deploy
+
+### Manual Deployment using Vercel CLI
+
+If you prefer using the Vercel CLI:
+
+1. Install Vercel CLI:
+   ```
+   npm i -g vercel
+   ```
+
+2. Login to Vercel:
+   ```
+   vercel login
+   ```
+
+3. Deploy:
+   ```
+   cd chat-frontend
+   vercel
+   ```
+
+4. Set the environment variable:
+   ```
+   vercel env add REACT_APP_WS_URL
+   ```
+
+## Running Locally
+
+1. Install dependencies:
+   ```
+   npm install
+   ```
+
+2. Start development server:
+   ```
+   npm start
+   ```
+
+The app will be available at [http://localhost:3000](http://localhost:3000).
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
