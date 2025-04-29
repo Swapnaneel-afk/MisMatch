@@ -6,7 +6,7 @@ mod db;
 use actix_web::{web, App, HttpServer, HttpResponse, middleware::Logger, rt::time};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use crate::handlers::http::chat_route;
+use crate::handlers::http::{chat_route, create_room, list_rooms};
 use crate::models::session::ChatSession;
 
 use actix_cors::Cors;
@@ -103,35 +103,46 @@ async fn main() -> std::io::Result<()> {
     // Create and start HTTP server
     HttpServer::new(move || {
         let cors = Cors::default()
-        .allowed_origin_fn(|origin, _req_head| {
-            // Allow all origins in development mode
-            let origin_str = origin.to_str().unwrap_or("");
-            origin_str.starts_with("http://localhost") || 
-            origin_str.contains("railway.app") ||
-            origin_str.contains("vercel.app") ||   // Add this line to allow Vercel domains
-            origin_str.starts_with("https://") 
-        })
-        .allowed_methods(vec!["GET", "POST"])
-        .allowed_headers(vec![
-            header::AUTHORIZATION,
-            header::ACCEPT,
-            header::CONTENT_TYPE
-        ])
-        .supports_credentials();
-
+            .allow_any_origin() // Allow all origins for testing
+            .allowed_methods(vec!["GET", "POST", "OPTIONS"])
+            .allowed_headers(vec![
+                header::AUTHORIZATION,
+                header::ACCEPT,
+                header::CONTENT_TYPE,
+                header::ORIGIN,
+                header::ACCESS_CONTROL_REQUEST_METHOD,
+                header::ACCESS_CONTROL_REQUEST_HEADERS,
+            ])
+            .max_age(3600)
+            .supports_credentials();
+            
+        // Build the app with core routes first
         let app = App::new()
             .wrap(cors)
             .wrap(Logger::default())
             .app_data(web::Data::new(connections.clone()))
-            .route("/ws", web::get().to(chat_route))
             .route("/health", web::get().to(health_check));
             
         // Add database pool to app data only if it's available
-        if let Some(pool) = &pool_option {
-            return app.app_data(web::Data::new(pool.clone()));
+        if let Some(ref pool) = pool_option {
+            let db_pool = web::Data::new(pool.clone());
+            
+            // Routes that need database access
+            return app
+                .app_data(db_pool.clone())
+                // WebSocket route with optional DB pool
+                .route("/ws", web::get().to(move |req, stream, srv| {
+                    chat_route(req, stream, srv, Some(db_pool.clone()))
+                }))
+                // Room management routes
+                .route("/api/rooms", web::get().to(list_rooms))
+                .route("/api/rooms", web::post().to(create_room));
         }
         
-        app
+        // Default route without DB for WebSockets
+        app.route("/ws", web::get().to(move |req, stream, srv| {
+            chat_route(req, stream, srv, None::<web::Data<deadpool_postgres::Pool>>)
+        }))
     })
     .bind(bind_address)?
     .run()

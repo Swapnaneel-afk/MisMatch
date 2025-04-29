@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Connection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .connecting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #log {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+            background-color: #f8f9fa;
+        }
+        .log-item {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .time {
+            color: #6c757d;
+            font-size: 0.8em;
+        }
+        input {
+            padding: 8px;
+            width: 400px;
+            margin-right: 5px;
+        }
+        .room-controls {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .room-list {
+            margin-top: 10px;
+        }
+        .room-item {
+            padding: 5px;
+            border: 1px solid #eee;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        .room-item:hover {
+            background-color: #e9ecef;
+        }
+        .current-room {
+            font-weight: bold;
+            background-color: #e2e3e5;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Connection Test</h1>
+    
+    <div id="status" class="disconnected">Disconnected</div>
+    
+    <div>
+        <input type="text" id="wsUrl" value="ws://localhost:8080/ws" placeholder="WebSocket URL">
+        <input type="text" id="username" value="tester" placeholder="Username">
+        <button id="connect">Connect</button>
+        <button id="disconnect" disabled>Disconnect</button>
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <input type="text" id="message" placeholder="Type a message" disabled>
+        <button id="sendBtn" disabled>Send</button>
+    </div>
+
+    <div class="room-controls">
+        <h3>Room Management</h3>
+        <div>
+            <input type="text" id="roomName" placeholder="Room name" disabled>
+            <select id="roomType" disabled>
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+                <option value="protected">Protected (Password)</option>
+            </select>
+            <input type="password" id="roomPassword" placeholder="Password (if protected)" disabled>
+            <button id="createRoomBtn" disabled>Create Room</button>
+        </div>
+        <div>
+            <button id="leaveRoomBtn" disabled>Leave Room</button>
+            <span id="currentRoom">Not in a room</span>
+        </div>
+        <h4>Available Rooms</h4>
+        <div id="roomList" class="room-list">
+            <div class="room-item">No rooms available</div>
+        </div>
+    </div>
+    
+    <div id="log"></div>
+    
+    <script>
+        let ws = null;
+        let currentRoomId = null;
+        let availableRooms = [];
+        
+        const statusEl = document.getElementById('status');
+        const wsUrlEl = document.getElementById('wsUrl');
+        const usernameEl = document.getElementById('username');
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+        const messageEl = document.getElementById('message');
+        const sendBtn = document.getElementById('sendBtn');
+        const logEl = document.getElementById('log');
+        
+        // Room elements
+        const roomNameEl = document.getElementById('roomName');
+        const roomTypeEl = document.getElementById('roomType');
+        const roomPasswordEl = document.getElementById('roomPassword');
+        const createRoomBtn = document.getElementById('createRoomBtn');
+        const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+        const currentRoomEl = document.getElementById('currentRoom');
+        const roomListEl = document.getElementById('roomList');
+        
+        function addLog(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const logItem = document.createElement('div');
+            logItem.className = `log-item ${type}`;
+            logItem.innerHTML = `<span class="time">[${time}]</span> ${message}`;
+            logEl.appendChild(logItem);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function connect() {
+            const wsUrl = wsUrlEl.value;
+            const username = usernameEl.value || 'tester';
+            
+            if (!wsUrl) {
+                addLog('Please enter a WebSocket URL', 'error');
+                return;
+            }
+            
+            // Construct URL with username parameter
+            const fullUrl = `${wsUrl}?username=${encodeURIComponent(username)}`;
+            
+            try {
+                addLog(`Attempting to connect to: ${fullUrl}`);
+                statusEl.className = 'connecting';
+                statusEl.textContent = 'Connecting...';
+                
+                ws = new WebSocket(fullUrl);
+                
+                ws.onopen = function() {
+                    addLog('Connected successfully', 'success');
+                    statusEl.className = 'connected';
+                    statusEl.textContent = 'Connected';
+                    
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    messageEl.disabled = false;
+                    sendBtn.disabled = false;
+                    
+                    // Enable room controls
+                    roomNameEl.disabled = false;
+                    roomTypeEl.disabled = false;
+                    roomPasswordEl.disabled = false;
+                    createRoomBtn.disabled = false;
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        addLog(`Received: ${JSON.stringify(data)}`, 'received');
+                        
+                        // Handle specific message types
+                        handleMessage(data);
+                    } catch (e) {
+                        addLog(`Received: ${event.data}`, 'received');
+                    }
+                };
+                
+                ws.onclose = function(event) {
+                    let reason = '';
+                    switch(event.code) {
+                        case 1000: reason = 'Normal closure'; break;
+                        case 1001: reason = 'Going away'; break;
+                        case 1002: reason = 'Protocol error'; break;
+                        case 1003: reason = 'Unsupported data'; break;
+                        case 1005: reason = 'No status received'; break;
+                        case 1006: reason = 'Abnormal closure'; break;
+                        case 1007: reason = 'Invalid frame payload data'; break;
+                        case 1008: reason = 'Policy violation'; break;
+                        case 1009: reason = 'Message too big'; break;
+                        case 1010: reason = 'Mandatory extension'; break;
+                        case 1011: reason = 'Internal server error'; break;
+                        case 1012: reason = 'Service restart'; break;
+                        case 1013: reason = 'Try again later'; break;
+                        case 1014: reason = 'Bad gateway'; break;
+                        case 1015: reason = 'TLS handshake'; break;
+                        default: reason = 'Unknown'; break;
+                    }
+                    
+                    addLog(`Disconnected: Code ${event.code} (${reason})`, 'error');
+                    statusEl.className = 'disconnected';
+                    statusEl.textContent = `Disconnected: ${reason}`;
+                    
+                    reset();
+                };
+                
+                ws.onerror = function(error) {
+                    addLog(`Error: ${error.message || 'Unknown error'}`, 'error');
+                    addLog('Check browser console for more details', 'error');
+                    console.error('WebSocket error:', error);
+                };
+                
+            } catch (error) {
+                addLog(`Failed to connect: ${error.message}`, 'error');
+                statusEl.className = 'disconnected';
+                statusEl.textContent = 'Connection failed';
+                reset();
+            }
+        }
+        
+        function handleMessage(message) {
+            switch(message.message_type) {
+                case 'room_list':
+                    updateRoomList(message.rooms || []);
+                    break;
+                case 'room_joined':
+                    currentRoomId = message.room_id;
+                    currentRoomEl.textContent = `Current room: ${currentRoomId}`;
+                    leaveRoomBtn.disabled = false;
+                    break;
+                case 'room_left':
+                    currentRoomId = null;
+                    currentRoomEl.textContent = 'Not in a room';
+                    leaveRoomBtn.disabled = true;
+                    break;
+                case 'error':
+                    addLog(`Error: ${message.error || message.text}`, 'error');
+                    break;
+            }
+        }
+        
+        function updateRoomList(rooms) {
+            availableRooms = rooms;
+            roomListEl.innerHTML = '';
+            
+            if (rooms.length === 0) {
+                roomListEl.innerHTML = '<div class="room-item">No rooms available</div>';
+                return;
+            }
+            
+            rooms.forEach(room => {
+                const div = document.createElement('div');
+                div.className = `room-item ${currentRoomId === room.id ? 'current-room' : ''}`;
+                div.textContent = `${room.name} (${room.room_type}${room.is_protected ? ' 🔒' : ''})`;
+                div.dataset.id = room.id;
+                div.dataset.protected = room.is_protected;
+                
+                div.addEventListener('click', () => joinRoom(room.id, room.is_protected));
+                
+                roomListEl.appendChild(div);
+            });
+        }
+        
+        function joinRoom(roomId, isProtected) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('Not connected to WebSocket', 'error');
+                return;
+            }
+            
+            let password = null;
+            if (isProtected) {
+                password = prompt('Please enter the room password:');
+                if (password === null) return; // User cancelled
+            }
+            
+            const joinCommand = {
+                room_id: roomId,
+                password: password
+            };
+            
+            const msgObj = {
+                message_type: 'join_room',
+                user: usernameEl.value || 'tester',
+                text: JSON.stringify(joinCommand),
+                timestamp: new Date().toISOString()
+            };
+            
+            ws.send(JSON.stringify(msgObj));
+            addLog(`Joining room: ${roomId}`, 'sent');
+        }
+        
+        function createRoom() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('Not connected to WebSocket', 'error');
+                return;
+            }
+            
+            const roomName = roomNameEl.value;
+            if (!roomName.trim()) {
+                addLog('Please enter a room name', 'error');
+                return;
+            }
+            
+            const roomType = roomTypeEl.value;
+            const password = roomType === 'protected' ? roomPasswordEl.value : null;
+            
+            if (roomType === 'protected' && !password) {
+                addLog('Please enter a password for the protected room', 'error');
+                return;
+            }
+            
+            const createCommand = {
+                name: roomName,
+                room_type: roomType,
+                password: password
+            };
+            
+            const msgObj = {
+                message_type: 'create_room',
+                user: usernameEl.value || 'tester',
+                text: JSON.stringify(createCommand),
+                timestamp: new Date().toISOString()
+            };
+            
+            ws.send(JSON.stringify(msgObj));
+            addLog(`Creating room: ${roomName}`, 'sent');
+            
+            // Clear the form
+            roomNameEl.value = '';
+            roomPasswordEl.value = '';
+        }
+        
+        function leaveRoom() {
+            if (!currentRoomId) {
+                addLog('Not in a room', 'error');
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('Not connected to WebSocket', 'error');
+                return;
+            }
+            
+            const msgObj = {
+                message_type: 'leave_room',
+                user: usernameEl.value || 'tester',
+                text: '',
+                timestamp: new Date().toISOString()
+            };
+            
+            ws.send(JSON.stringify(msgObj));
+            addLog(`Leaving room: ${currentRoomId}`, 'sent');
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                addLog('Disconnected by user');
+            }
+            reset();
+        }
+        
+        function reset() {
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            messageEl.disabled = true;
+            sendBtn.disabled = true;
+            roomNameEl.disabled = true;
+            roomTypeEl.disabled = true;
+            roomPasswordEl.disabled = true;
+            createRoomBtn.disabled = true;
+            leaveRoomBtn.disabled = true;
+            currentRoomId = null;
+            currentRoomEl.textContent = 'Not in a room';
+            roomListEl.innerHTML = '<div class="room-item">No rooms available</div>';
+            ws = null;
+        }
+        
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('Not connected to WebSocket', 'error');
+                return;
+            }
+            
+            const message = messageEl.value;
+            if (!message.trim()) {
+                return;
+            }
+            
+            try {
+                const msgObj = {
+                    message_type: 'chat',
+                    user: usernameEl.value || 'tester',
+                    text: message,
+                    timestamp: new Date().toISOString()
+                };
+                
+                // Add room_id if in a room
+                if (currentRoomId) {
+                    msgObj.room_id = currentRoomId;
+                }
+                
+                ws.send(JSON.stringify(msgObj));
+                addLog(`Sent: ${JSON.stringify(msgObj)}`, 'sent');
+                messageEl.value = '';
+            } catch (error) {
+                addLog(`Failed to send message: ${error.message}`, 'error');
+            }
+        }
+        
+        // Setup event listeners
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+        sendBtn.addEventListener('click', sendMessage);
+        createRoomBtn.addEventListener('click', createRoom);
+        leaveRoomBtn.addEventListener('click', leaveRoom);
+        
+        messageEl.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Show/hide password field based on room type
+        roomTypeEl.addEventListener('change', function() {
+            roomPasswordEl.style.display = this.value === 'protected' ? 'inline-block' : 'none';
+        });
+        
+        // Initial setup
+        roomPasswordEl.style.display = 'none';
+        
+        // Instructions for troubleshooting
+        addLog('WebSocket Test Tool Ready', 'info');
+        addLog('1. Enter your WebSocket URL above', 'info');
+        addLog('2. Enter a username (optional)', 'info');
+        addLog('3. Click "Connect" to establish connection', 'info');
+        addLog('4. If connected, you can send messages', 'info');
+        addLog('5. Use the room controls to create/join rooms', 'info');
+        addLog('6. Check the logs below for connection status', 'info');
+    </script>
+</body>
+</html> 

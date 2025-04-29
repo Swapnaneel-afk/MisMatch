@@ -1,5 +1,5 @@
 import { styled, keyframes, alpha } from "@mui/material/styles";
-import { Paper, Box, TextField } from "@mui/material";
+import { Paper, Box, TextField, Fab } from "@mui/material";
 
 const fadeIn = keyframes`
   from {
@@ -126,4 +126,77 @@ export const InputArea = styled(Box)(({ theme }) => ({
     theme.palette.mode === "dark"
       ? "rgba(0, 0, 0, 0.5)"
       : "rgba(255, 255, 255, 0.5)",
+}));
+
+// New components for room management
+export const SidebarContainer = styled(Box)(({ theme, isOpen }) => ({
+  position: 'fixed',
+  top: 0,
+  left: isOpen ? 0 : '-280px',
+  width: 280,
+  height: '100vh',
+  backgroundColor: theme.palette.mode === "dark" ? "#111" : "#f5f5f5",
+  borderRight: `1px solid ${theme.palette.divider}`,
+  zIndex: 1200,
+  display: 'flex',
+  flexDirection: 'column',
+  transition: 'left 0.3s ease-in-out',
+  boxShadow: isOpen ? theme.shadows[8] : 'none',
+}));
+
+export const SidebarHeader = styled(Box)(({ theme }) => ({
+  padding: theme.spacing(2),
+  borderBottom: `1px solid ${theme.palette.divider}`,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  backgroundColor: theme.palette.mode === "dark" ? "#000" : "#fff",
+}));
+
+export const RoomsList = styled(Box)(({ theme }) => ({
+  flexGrow: 1,
+  overflow: 'auto',
+  padding: theme.spacing(1),
+}));
+
+export const RoomItem = styled(Box)(({ theme, isActive }) => ({
+  padding: theme.spacing(1.5),
+  borderRadius: theme.shape.borderRadius,
+  marginBottom: theme.spacing(0.5),
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  cursor: 'pointer',
+  backgroundColor: isActive ? 
+    (theme.palette.mode === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)") 
+    : 'transparent',
+  '&:hover': {
+    backgroundColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
+  },
+}));
+
+export const RoomName = styled(Box)({
+  flexGrow: 1,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+});
+
+export const ActionButtons = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  gap: theme.spacing(0.5),
+}));
+
+// Floating action button
+export const FloatingButton = styled(Fab)(({ theme }) => ({
+  position: 'absolute',
+  bottom: theme.spacing(2),
+  right: theme.spacing(2),
+}));
+
+// Dialog components
+export const ModalContent = styled(Paper)(({ theme }) => ({
+  backgroundColor: theme.palette.background.paper,
+  borderRadius: theme.shape.borderRadius,
+  padding: theme.spacing(2),
 }));

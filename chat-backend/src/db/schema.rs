@@ -34,5 +34,15 @@ pub async fn create_tables(client: &Client) -> Result<(), tokio_postgres::Error>
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        
+        -- Create indexes for better performance
+        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+        CREATE INDEX IF NOT EXISTS idx_rooms_name ON rooms(name);
+        CREATE INDEX IF NOT EXISTS idx_rooms_type ON rooms(\"type\");
+        CREATE INDEX IF NOT EXISTS idx_room_members_room_id ON room_members(room_id);
+        CREATE INDEX IF NOT EXISTS idx_room_members_user_id ON room_members(user_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
     ").await
 }

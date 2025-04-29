@@ -6,11 +6,14 @@ import {
   Avatar,
   useTheme,
   Button,
+  Badge,
 } from "@mui/material";
 import { motion, AnimatePresence } from "framer-motion";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import ChatIcon from "@mui/icons-material/Chat";
+import MenuIcon from "@mui/icons-material/Menu";
 import { format } from "date-fns";
 import {
   ChatContainer,
@@ -22,6 +25,7 @@ import {
   StyledTextField,
   UserChip,
 } from "./StyledComponents";
+import RoomSidebar from "./RoomSidebar";
 
 function Chat({ toggleTheme }) {
   const [messages, setMessages] = useState([]);
@@ -30,6 +34,11 @@ function Chat({ toggleTheme }) {
   const [username, setUsername] = useState("");
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [typingUsers, setTypingUsers] = useState(new Set());
+  // Room management state
+  const [rooms, setRooms] = useState([]);
+  const [currentRoomId, setCurrentRoomId] = useState(null);
+  const [isSidebarOpen, setSidebarOpen] = useState(false);
+  
   const wsRef = useRef(null);
   const messageAreaRef = useRef(null);
   const typingTimeoutRef = useRef({});
@@ -61,49 +70,83 @@ function Chat({ toggleTheme }) {
     };
 
     wsRef.current.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log("Received message:", message);
+      try {
+        const message = JSON.parse(event.data);
+        console.log("Received message:", message);
 
-      switch (message.message_type) {
-        case "user_list": // Handle the new UserList message type
-          if (message.users) {
-            setOnlineUsers(new Set(message.users));
-          }
-          break;
-        case "typing":
-          // Only add typing indicator if it's not the current user
-          if (message.user !== username) {
-            setTypingUsers((prev) => new Set([...prev, message.user]));
-          }
-          break;
-        case "stop_typing":
-          setTypingUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(message.user);
-            return newSet;
-          });
-          break;
-        case "join":
-          setOnlineUsers((prev) => new Set([...prev, message.user]));
-          setMessages((prev) => [...prev, message]);
-          break;
-        case "leave":
-          setOnlineUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(message.user);
-            return newSet;
-          });
-          setMessages((prev) => [...prev, message]);
-          break;
-        case "chat":
-          setMessages((prev) => [...prev, message]);
-          break;
-        default:
-          console.log("Unknown message type:", message.message_type);
-      }
+        switch (message.message_type) {
+          case "user_list": // Handle the new UserList message type
+            if (message.users) {
+              setOnlineUsers(new Set(message.users));
+            }
+            break;
+          case "room_list": // Handle room list updates
+            if (message.rooms) {
+              console.log("Received room list:", message.rooms);
+              setRooms(message.rooms);
+            }
+            break;
+          case "room_joined":
+            console.log("Joined room:", message.room_id);
+            if (message.room_id) {
+              setCurrentRoomId(message.room_id);
+              // Clear messages when joining a new room
+              setMessages([]);
+              // When we join a room, add the notification
+              setMessages(prev => [...prev, message]);
+            } else {
+              console.error("Received room_joined event but no room_id was provided");
+            }
+            break;
+          case "room_left":
+            if (message.room_id === currentRoomId) {
+              setMessages(prev => [...prev, message]);
+            }
+            break;
+          case "typing":
+            // Only add typing indicator if it's not the current user
+            if (message.user !== username) {
+              setTypingUsers((prev) => new Set([...prev, message.user]));
+            }
+            break;
+          case "stop_typing":
+            setTypingUsers((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(message.user);
+              return newSet;
+            });
+            break;
+          case "join":
+            setOnlineUsers((prev) => new Set([...prev, message.user]));
+            setMessages((prev) => [...prev, message]);
+            break;
+          case "leave":
+            setOnlineUsers((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(message.user);
+              return newSet;
+            });
+            setMessages((prev) => [...prev, message]);
+            break;
+          case "chat":
+            // Only show messages for current room or global chat
+            if (!message.room_id || message.room_id === currentRoomId) {
+              setMessages((prev) => [...prev, message]);
+            }
+            break;
+          case "error":
+            console.error("Error from server:", message.error);
+            alert(`Error: ${message.text}${message.error ? ` - ${message.error}` : ''}`);
+            break;
+          default:
+            console.log("Unknown message type:", message.message_type);
+        }
 
-      if (messageAreaRef.current) {
-        messageAreaRef.current.scrollTop = messageAreaRef.current.scrollHeight;
+        if (messageAreaRef.current) {
+          messageAreaRef.current.scrollTop = messageAreaRef.current.scrollHeight;
+        }
+      } catch (error) {
+        console.error("Error processing message:", error, event.data);
       }
     };
 
@@ -173,10 +216,80 @@ function Chat({ toggleTheme }) {
       user: username,
       text: messageInput.trim(),
       timestamp: new Date().toISOString(),
+      room_id: currentRoomId
     };
 
     wsRef.current.send(JSON.stringify(message));
     setMessageInput("");
+  };
+
+  // Room management functions
+  const handleCreateRoom = (roomName) => {
+    if (!wsRef.current || !roomName?.trim()) {
+      console.error("Cannot create room: WebSocket not connected or room name empty");
+      return;
+    }
+    
+    console.log("Creating room:", roomName);
+    
+    try {
+      const createRoomCommand = {
+        name: roomName,
+        room_type: "public", // Default to public, you can add room type selection
+        password: null // Default to no password
+      };
+      
+      const message = {
+        message_type: "create_room",
+        user: username,
+        text: JSON.stringify(createRoomCommand),
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log("Sending create room message:", message);
+      wsRef.current.send(JSON.stringify(message));
+    } catch (error) {
+      console.error("Error creating room:", error);
+    }
+  };
+
+  const handleJoinRoom = (roomId) => {
+    if (wsRef.current) {
+      console.log(`Attempting to join room with ID: ${roomId}`);
+      
+      const joinRoomCommand = {
+        room_id: roomId,
+        password: null // Add password handling if needed
+      };
+      
+      const message = {
+        message_type: "join_room",
+        user: username,
+        text: JSON.stringify(joinRoomCommand),
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log("Sending join room message:", message);
+      wsRef.current.send(JSON.stringify(message));
+      setSidebarOpen(false); // Close sidebar after joining
+    } else {
+      console.error("Cannot join room: WebSocket not connected");
+    }
+  };
+
+  const handleLeaveRoom = () => {
+    if (wsRef.current && currentRoomId) {
+      const message = {
+        message_type: "leave_room",
+        user: username,
+        text: "",
+        timestamp: new Date().toISOString(),
+        room_id: currentRoomId
+      };
+      
+      wsRef.current.send(JSON.stringify(message));
+      setCurrentRoomId(null);
+    }
   };
 
   if (!username) {
@@ -258,13 +371,34 @@ function Chat({ toggleTheme }) {
     );
   }
 
+  // Current room name display
+  const currentRoom = rooms.find(room => room.id === currentRoomId);
+  const roomTitle = currentRoom ? currentRoom.name : "Global Chat";
+
   return (
     <ChatContainer>
       <Header>
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <IconButton 
+            onClick={() => setSidebarOpen(true)}
+            size="small" 
+            sx={{ mr: 1 }}
+          >
+            <MenuIcon />
+          </IconButton>
           <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            Chat Room {connected ? "(Connected)" : "(Disconnected)"}
+            {roomTitle} {connected ? "(Connected)" : "(Disconnected)"}
           </Typography>
+          {currentRoomId && (
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={handleLeaveRoom}
+              sx={{ ml: 2 }}
+            >
+              Leave Room
+            </Button>
+          )}
           <Box sx={{ display: "flex", gap: 1 }}>
             <AnimatePresence>
               {Array.from(onlineUsers).map((user) => (
@@ -290,6 +424,18 @@ function Chat({ toggleTheme }) {
           </Box>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <Badge 
+            badgeContent={rooms.length} 
+            color="primary"
+            sx={{ mr: 1 }}
+          >
+            <IconButton 
+              onClick={() => setSidebarOpen(true)}
+              size="small"
+            >
+              <ChatIcon />
+            </IconButton>
+          </Badge>
           <Typography variant="body2" color="text.secondary">
             {username}
           </Typography>
@@ -352,7 +498,7 @@ function Chat({ toggleTheme }) {
               setMessageInput(e.target.value);
               handleTyping();
             }}
-            placeholder="Type a message..."
+            placeholder={`Type a message in ${roomTitle}...`}
             disabled={!connected}
             InputProps={{
               endAdornment: (
@@ -385,6 +531,16 @@ function Chat({ toggleTheme }) {
           )}
         </AnimatePresence>
       </InputArea>
+
+      {/* Room Management Components */}
+      <RoomSidebar
+        isOpen={isSidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        rooms={rooms}
+        selectedRoom={currentRoomId}
+        onSelectRoom={handleJoinRoom}
+        onCreateRoom={handleCreateRoom}
+      />
     </ChatContainer>
   );
 }
